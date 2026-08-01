@@ -18,6 +18,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/**'
+  pull_request:
   workflow_dispatch:
     inputs:
       ref:
@@ -93,6 +94,7 @@ jobs:
           ls -la pkg/
 
       - name: Upload artifact
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: picoclaw-linux-arm64
