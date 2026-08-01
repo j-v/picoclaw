@@ -1,0 +1,100 @@
+name: Build PicoClaw (arm64)
+
+# Cross-compiles BOTH binaries (picoclaw CLI/gateway + picoclaw-launcher web console)
+# for linux/arm64 on GitHub-hosted runners and uploads them as a build artifact.
+# The Pi watchdog polls for these artifacts and self-deploys (pull-based, zero sudo).
+#
+# This workflow is additive on purpose: upstream's build.yml (integration tests +
+# build-all) is left untouched so future upstream merges stay conflict-free.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.go'
+      - 'web/frontend/**'
+      - 'Makefile'
+      - 'web/Makefile'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit SHA to build'
+        required: false
+        default: 'main'
+
+env:
+  GO_BUILD_TAGS: 'goolm,stdjson'
+
+jobs:
+  build:
+    name: Cross-Compile (linux/arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Build picoclaw (CLI/gateway)
+        run: |
+          VERSION=$(git describe --tags --always --dirty)
+          COMMIT=$(git rev-parse --short=8 HEAD)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          GO_VERSION=$(go env GOVERSION)
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+            -tags "$GO_BUILD_TAGS" \
+            -ldflags="-s -w \
+              -X github.com/sipeed/picoclaw/pkg/config.Version=$VERSION \
+              -X github.com/sipeed/picoclaw/pkg/config.GitCommit=$COMMIT \
+              -X github.com/sipeed/picoclaw/pkg/config.BuildTime=$BUILD_TIME \
+              -X github.com/sipeed/picoclaw/pkg/config.GoVersion=$GO_VERSION" \
+            -o picoclaw-linux-arm64 \
+            ./cmd/picoclaw
+
+      - name: Build launcher frontend
+        run: make -C web build-frontend
+
+      - name: Build picoclaw-launcher (web console)
+        run: |
+          VERSION=$(git describe --tags --always --dirty)
+          COMMIT=$(git rev-parse --short=8 HEAD)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          GO_VERSION=$(go env GOVERSION)
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+            -tags "$GO_BUILD_TAGS" \
+            -ldflags="-s -w \
+              -X github.com/sipeed/picoclaw/pkg/config.Version=$VERSION \
+              -X github.com/sipeed/picoclaw/pkg/config.GitCommit=$COMMIT \
+              -X github.com/sipeed/picoclaw/pkg/config.BuildTime=$BUILD_TIME \
+              -X github.com/sipeed/picoclaw/pkg/config.GoVersion=$GO_VERSION" \
+            -o picoclaw-launcher-linux-arm64 \
+            ./web/backend
+
+      - name: Package artifact
+        run: |
+          mkdir -p pkg
+          cp picoclaw-linux-arm64 pkg/picoclaw
+          cp picoclaw-launcher-linux-arm64 pkg/picoclaw-launcher
+          ls -la pkg/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: picoclaw-linux-arm64
+          path: pkg/
+          retention-days: 1
