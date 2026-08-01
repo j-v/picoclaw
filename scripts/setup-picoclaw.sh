@@ -42,11 +42,19 @@ done
 echo "   ✔️  Prerequisites present: gh jq nc curl file"
 
 if ! gh auth status >/dev/null 2>&1; then
-  echo ""
-  echo "--- gh auth login (interactive) ---"
-  echo "Choose: GitHub.com → HTTPS → Login with a web browser → Yes (git credentials)"
-  echo ""
-  gh auth login
+  if [ -f "$HOME/.picoclaw/gh-token.txt" ]; then
+    echo "--- gh auth login (fine-grained PAT from ~/.picoclaw/gh-token.txt) ---"
+    chmod 600 "$HOME/.picoclaw/gh-token.txt"
+    gh auth login --hostname github.com --git-protocol https --with-token < "$HOME/.picoclaw/gh-token.txt"
+    rm -f "$HOME/.picoclaw/gh-token.txt"   # token now lives in ~/.config/gh/ (per plan)
+    echo "   ✔️  Token imported; plaintext file removed"
+  else
+    echo ""
+    echo "--- gh auth login (interactive) ---"
+    echo "Choose: GitHub.com → HTTPS → Login with a web browser → Yes (git credentials)"
+    echo ""
+    gh auth login
+  fi
 fi
 echo "   ✔️  gh authenticated as: $(gh api user --jq .login 2>/dev/null || echo '?')"
 
