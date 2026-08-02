@@ -53,7 +53,7 @@ func TestMaskAPIKeyValue(t *testing.T) {
 		},
 		{
 			name: "typical api key",
-			key:  "sk-1234567890abcd",
+			key:  "sk-1234567890abcd", // gitleaks:allow test fixture key
 			want: "sk-****abcd",
 		},
 	}
