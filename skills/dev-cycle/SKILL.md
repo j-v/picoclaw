@@ -62,15 +62,32 @@ knows where the cycle is. **No silent phases.**
 
 ## Push + PR workflow (Tier 3 — human-gated merge)
 
-The agent pushes to a **feature branch only**. `main` is branch-protected: PR required,
-human merge. Never attempt a direct push to `main`.
+The agent pushes to a **feature branch only** (`fix/...`, `feat/...`). `main` is
+branch-protected: PR required, human merge. Never attempt a direct push to `main`.
+
+**Exec-guard reality (verified 2026-08-02):** `git push` is on the exec **allow list**
+(`tools.exec.custom_allow_patterns` in config.json), so the agent CAN push feature
+branches. Deny rules still hard-block `ssh host@`, `sudo`, `pkill`, heredocs, `${...}`,
+etc. Do not bypass those.
+
+**PR creation is automatic (no PR write on the agent token):** the `auto-pr` workflow
+(`.github/workflows/auto-pr.yml`) opens the PR on branch push using the repo's
+`GITHUB_TOKEN` — PRs are authored by `github-actions[bot]`, and the agent's PAT has
+NO Pull requests permission, so the agent cannot create, approve, or merge PRs.
 
 ```bash
+# AGENT: prepare branch + commit (gitleaks hook fires on commit)
 git checkout -b fix/<desc>
 git add -A && git commit -m "fix: <desc>"
-git push origin fix/<desc>
-gh pr create --fill            # then ping the user with the PR link
-# USER merges via GitHub Mobile / web UI / CLI on a separate device
+
+# AGENT: push (allow-listed) — auto-pr workflow opens the PR
+git push -u fork fix/<desc>
+
+# AGENT: wait for the workflow, then fetch the PR URL (read-only, token has pull:read)
+gh pr view fix/<desc> --repo j-v/picoclaw --json url --jq .url
+# → ping the user with the link
+
+# USER: approve (optional) + merge via GitHub Mobile / web UI / CLI
 ```
 
 ## Pre-deploy checklist (before any deploy action or force-poll)
