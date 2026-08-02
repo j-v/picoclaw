@@ -8,9 +8,12 @@ name: gitleaks
 #   1. gitleaks pre-commit hook (Pi, convenience only)
 #   2. GitHub push protection (server-side prevention, free for all repos)
 #   3. this workflow (server-side detection + merge gate)
+#
+# Trigger is `push` only (all branches): PRs are authored by github-actions[bot]
+# and pull_request-triggered runs from bot authors require maintainer approval.
+# Push runs are trusted and their checks still display on the PR.
 
 on:
-  pull_request:
   push:
     branches: ['**']   # scan feature branches immediately, not just at PR time
 
