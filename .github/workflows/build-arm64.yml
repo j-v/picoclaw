@@ -6,6 +6,11 @@ name: Build PicoClaw (arm64)
 #
 # This workflow is additive on purpose: upstream's build.yml (integration tests +
 # build-all) is left untouched so future upstream merges stay conflict-free.
+#
+# ⚠️ Packaging dir is `dist/`, NOT `pkg/`: this repo's Go source lives in the
+# real top-level `pkg/` dir, so `path: pkg/` would upload the entire source tree
+# (698 files) instead of the two binaries — breaking `gh run download` on the Pi
+# ("would result in path traversal") and failing the watchdog deploy.
 
 on:
   push:
@@ -88,15 +93,15 @@ jobs:
 
       - name: Package artifact
         run: |
-          mkdir -p pkg
-          cp picoclaw-linux-arm64 pkg/picoclaw
-          cp picoclaw-launcher-linux-arm64 pkg/picoclaw-launcher
-          ls -la pkg/
+          mkdir -p dist
+          cp picoclaw-linux-arm64 dist/picoclaw
+          cp picoclaw-launcher-linux-arm64 dist/picoclaw-launcher
+          ls -la dist/
 
       - name: Upload artifact
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: picoclaw-linux-arm64
-          path: pkg/
+          path: dist/
           retention-days: 1

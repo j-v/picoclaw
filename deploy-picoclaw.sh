@@ -270,13 +270,16 @@ deploy() {
     return 1
   fi
 
-  # --- Locate binaries (artifact may be a flat dir or nested in pkg/) ---
+  # --- Locate binaries (artifact may be a flat dir or nested in dist/ or pkg/) ---
   local launcher_bin=""
   local cli_bin=""
 
   if [ -f "$tmp_dir/picoclaw-launcher" ]; then
     launcher_bin="$tmp_dir/picoclaw-launcher"
     cli_bin="$tmp_dir/picoclaw"
+  elif [ -f "$tmp_dir/dist/picoclaw-launcher" ]; then
+    launcher_bin="$tmp_dir/dist/picoclaw-launcher"
+    cli_bin="$tmp_dir/dist/picoclaw"
   elif [ -f "$tmp_dir/pkg/picoclaw-launcher" ]; then
     launcher_bin="$tmp_dir/pkg/picoclaw-launcher"
     cli_bin="$tmp_dir/pkg/picoclaw"
