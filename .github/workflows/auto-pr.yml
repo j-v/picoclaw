@@ -40,9 +40,7 @@ jobs:
           fi
 
           TITLE="$(git log -1 --format=%s "$HEAD")"
-          BODY="Auto-opened by the \`auto-pr\` workflow (GITHUB_TOKEN as github-actions[bot]).
-
-Human approval + merge required — the agent's PAT intentionally has no Pull requests permission, so this PR cannot be merged by the agent."
+          BODY="Auto-opened by the auto-pr workflow (GITHUB_TOKEN as github-actions[bot]). Human approval + merge required — the agent's PAT intentionally has no Pull requests permission, so this PR cannot be merged by the agent."
 
           gh pr create \
             --repo "$REPO" \
