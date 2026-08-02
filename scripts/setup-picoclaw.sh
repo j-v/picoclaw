@@ -3,7 +3,7 @@
 # PicoClaw pipeline — one-time Pi bootstrap (interactive)
 #
 # Run ONCE from an interactive SSH session on the Pi:
-#   cd ~/picoclaw && bash scripts/setup-picoclaw.sh
+#   cd ~/src/picoclaw && bash scripts/setup-picoclaw.sh
 #
 # It needs sudo (first TWO commands only), your GitHub login
 # (gh auth login), and your hands (deploy key paste, autostart edit).
