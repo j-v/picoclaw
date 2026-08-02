@@ -89,7 +89,7 @@ ensure_dirs() {
 # Fail fast if gh isn't authenticated
 check_gh_auth() {
   if ! gh auth status 2>/dev/null; then
-    log "❌ gh CLI not authenticated. Run: gh auth login"
+    log "❌ gh CLI not authenticated. Run setup-picoclaw.sh step 0 (fine-grained PAT), or: gh auth login"
     exit 1
   fi
 }
