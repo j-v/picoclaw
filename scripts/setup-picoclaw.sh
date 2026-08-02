@@ -5,8 +5,9 @@
 # Run ONCE from an interactive SSH session on the Pi:
 #   cd ~/src/picoclaw && bash scripts/setup-picoclaw.sh
 #
-# It needs sudo (first TWO commands only), your GitHub login
-# (gh auth login), and your hands (deploy key paste, autostart edit).
+# It needs sudo (first TWO commands only), a GitHub fine-grained PAT
+# (saved at ~/.picoclaw/gh-token.txt — no interactive login), and your
+# hands (deploy key paste, autostart edit).
 # After this step, everything else is automated.
 #
 # Not fully idempotent: if it fails midway, fix the failing step
@@ -50,13 +51,30 @@ if ! gh auth status >/dev/null 2>&1; then
     echo "   ✔️  Token imported; plaintext file removed"
   else
     echo ""
-    echo "--- gh auth login (interactive) ---"
-    echo "Choose: GitHub.com → HTTPS → Login with a web browser → Yes (git credentials)"
+    echo "❌ gh is not authenticated, and no deploy token found at ~/.picoclaw/gh-token.txt"
     echo ""
-    gh auth login
+    echo "   Create a fine-grained PAT (NOT a browser login — the Pi must not hold your full account):"
+    echo "     GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token"
+    echo "     - Repository access: Only select repositories → j-v/picoclaw"
+    echo "     - Repository permissions:"
+    echo "         Actions:  Read-only           (watchdog polls builds + downloads artifacts)"
+    echo "         Contents: Read and write      (agent pushes feature branches)"
+    echo "         Pull requests: LEAVE UNSET    (auto-pr workflow opens PRs; agent needs NO PR write)"
+    echo "     - Expiration: 90 days (or shorter)"
+    echo ""
+    echo "   Save the token to ~/.picoclaw/gh-token.txt and re-run this script."
+    echo ""
+    exit 1
   fi
 fi
 echo "   ✔️  gh authenticated as: $(gh api user --jq .login 2>/dev/null || echo '?')"
+
+# Soft-check the token can do what the deploy watchdog needs (Actions: read).
+# Not fatal — setup can finish, but the watchdog will fail at first poll.
+if ! gh api "repos/j-v/picoclaw/actions/runs?per_page=1" >/dev/null 2>&1; then
+  echo "   ⚠️  gh token could not read Actions runs for j-v/picoclaw — the deploy watchdog"
+  echo "       needs Actions: Read-only. Recreate the token with that permission."
+fi
 
 # ------------------------------------------------------------
 # 1. Create directory structure (the second and last sudo)
@@ -207,6 +225,35 @@ else
   echo "⚠️  Launcher not responding yet — check: journalctl --user -u picoclaw-launcher -n 50 --no-pager"
 fi
 
+# ------------------------------------------------------------
+# 9. Test Telegram deploy notification
+# ------------------------------------------------------------
+echo ""
+echo "[9/9] Testing Telegram deploy notification..."
+SECURITY_FILE="$HOME/.picoclaw/.security.yml"
+TELEGRAM_CHAT_ID="8707367919"
+tg_token=$(python3 -c "
+import yaml
+try:
+    d = yaml.safe_load(open('$SECURITY_FILE'))
+    print(d.get('channel_list', {}).get('telegram', {}).get('settings', {}).get('token', ''))
+except Exception:
+    pass
+" 2>/dev/null)
+if [ -z "$tg_token" ]; then
+  echo "   ⚠️  No Telegram token in $SECURITY_FILE — skipped (deploy notifications will be silent)."
+  echo "       Add channel_list.telegram.settings.token to $SECURITY_FILE to enable them."
+else
+  if curl -sf -o /dev/null -X POST "https://api.telegram.org/bot${tg_token}/sendMessage" \
+      --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+      --data-urlencode "text=✅ PicoClaw pipeline initialized — watchdog running. Deploy notifications active." \
+      --data-urlencode "disable_web_page_preview=true"; then
+    echo "   ✅ Test notification sent to Telegram"
+  else
+    echo "   ⚠️  Telegram send failed — check the token in $SECURITY_FILE"
+  fi
+fi
+
 echo ""
 echo "=== Setup complete ==="
 echo ""
@@ -219,3 +266,7 @@ echo "  2. Gitleaks (Phase 3):"
 echo "     go install github.com/gitleaks/gitleaks/v8@latest   (or download the release binary)"
 echo "     export PATH=\$PATH:\$HOME/go/bin"
 echo "  3. Watch the first deploy: journalctl --user -u picoclaw-deploy.service -f"
+echo ""
+echo "Note: gh auth is done above (step 0) using a fine-grained PAT only —"
+echo "no interactive browser login. If you re-run setup later, it skips auth"
+echo "when gh is already authenticated."
