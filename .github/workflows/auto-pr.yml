@@ -5,6 +5,10 @@ name: auto-pr
 # so the agent's PAT never needs Pull requests: write.
 # PRs are authored by github-actions[bot] → a human (j-v) CAN approve them.
 # Merging stays 100% human-gated: the agent token has no PR write at all.
+#
+# REQUIRES repo setting: Settings → Actions → General → Workflow permissions →
+# "Allow GitHub Actions to create and approve pull requests" (enabled 2026-08-02).
+# The YAML permissions block alone is NOT sufficient — the repo-level toggle gates it.
 
 on:
   push:
