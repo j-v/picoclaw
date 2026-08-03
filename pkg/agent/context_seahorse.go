@@ -56,11 +56,20 @@ func newSeahorseContextManager(_ json.RawMessage, al *AgentLoop) (ContextManager
 	al.RegisterTool(seahorse.NewGrepTool(retrieval))
 	al.RegisterTool(seahorse.NewExpandTool(retrieval))
 
-	// Bootstrap all existing sessions at startup
-	if agent.Sessions != nil {
-		ctx := context.Background()
-		for _, sessionKey := range agent.Sessions.ListSessions() {
-			mgr.bootstrapSession(ctx, sessionKey)
+	// Bootstrap all existing sessions at startup, for ALL registered agents.
+	// Routed agents keep history in their own session stores; a seahorse
+	// turn for a routed session would otherwise start with empty context
+	// because only the default agent's store was imported.
+	ctx := context.Background()
+	if al.registry != nil {
+		for _, agentID := range al.registry.ListAgentIDs() {
+			agent, ok := al.registry.GetAgent(agentID)
+			if !ok || agent == nil || agent.Sessions == nil {
+				continue
+			}
+			for _, sessionKey := range agent.Sessions.ListSessions() {
+				mgr.bootstrapSession(ctx, agent.Sessions, sessionKey)
+			}
 		}
 	}
 
@@ -179,12 +188,16 @@ func (m *seahorseContextManager) Clear(ctx context.Context, sessionKey string) e
 }
 
 // bootstrapSession reconciles JSONL session history into seahorse SQLite.
-func (m *seahorseContextManager) bootstrapSession(ctx context.Context, sessionKey string) {
-	if m.sessions == nil {
+func (m *seahorseContextManager) bootstrapSession(
+	ctx context.Context,
+	sessions session.SessionStore,
+	sessionKey string,
+) {
+	if sessions == nil {
 		return
 	}
 
-	history := m.sessions.GetHistory(sessionKey)
+	history := sessions.GetHistory(sessionKey)
 	if len(history) == 0 {
 		return
 	}
