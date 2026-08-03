@@ -384,7 +384,7 @@ tight_poll() {
     # Also check: did a different run complete while we were watching?
     local latest_success
     latest_success=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" --branch main --status success --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null)
-    if [ -n "$latest_success" ] && [ "$latest_success" != "$run_id" ]; then
+    if [ -n "$latest_success" ] && [ "$latest_success" != "$run_id" ] && ! is_failed "$latest_success"; then
       if [ ! -f "$STATE_FILE" ] || [ "$(cat "$STATE_FILE")" != "$latest_success" ]; then
         log "⚠️  New successful run #$latest_success appeared while tracking #$run_id — deploying"
         deploy "$latest_success" ""
