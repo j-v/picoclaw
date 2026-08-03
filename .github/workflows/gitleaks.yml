@@ -1,0 +1,33 @@
+name: gitleaks
+
+# Server-side secret scan — the enforcement layer the Pi cannot fake.
+# Runs on GitHub-hosted runners (not the Pi), scans all branches, and
+# is a REQUIRED status check on main (see branch protection in Phase 1).
+#
+# Layer stack (from Step 7 of PIPELINE_PLAN.md):
+#   1. gitleaks pre-commit hook (Pi, convenience only)
+#   2. GitHub push protection (server-side prevention, free for all repos)
+#   3. this workflow (server-side detection + merge gate)
+#
+# Trigger is `push` only (all branches): PRs are authored by github-actions[bot]
+# and pull_request-triggered runs from bot authors require maintainer approval.
+# Push runs are trusted and their checks still display on the PR.
+
+on:
+  push:
+    branches: ['**']   # scan feature branches immediately, not just at PR time
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

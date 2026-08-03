@@ -1,0 +1,55 @@
+name: auto-pr
+
+# Opens a PR automatically when a feature/fix branch is pushed.
+# Uses the repo's GITHUB_TOKEN (scoped to this repo, acts as github-actions[bot])
+# so the agent's PAT never needs Pull requests: write.
+# PRs are authored by github-actions[bot] → a human (j-v) CAN approve them.
+# Merging stays 100% human-gated: the agent token has no PR write at all.
+#
+# REQUIRES repo setting: Settings → Actions → General → Workflow permissions →
+# "Allow GitHub Actions to create and approve pull requests" (enabled 2026-08-02).
+# The YAML permissions block alone is NOT sufficient — the repo-level toggle gates it.
+
+on:
+  push:
+    branches:
+      - 'fix/**'
+      - 'feat/**'
+      - 'feature/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open-or-update-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Open or update PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          HEAD="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+
+          # Idempotent: skip if a PR for this head branch already exists
+          if gh pr view "$HEAD" --repo "$REPO" --json url --jq .url >/dev/null 2>&1; then
+            echo "PR already exists for $HEAD — skipping (no-op)"
+            exit 0
+          fi
+
+          TITLE="$(git log -1 --format=%s "$HEAD")"
+          BODY="Auto-opened by the auto-pr workflow (GITHUB_TOKEN as github-actions[bot]). Human approval + merge required — the agent's PAT intentionally has no Pull requests permission, so this PR cannot be merged by the agent."
+
+          gh pr create \
+            --repo "$REPO" \
+            --base main \
+            --head "$HEAD" \
+            --title "$TITLE" \
+            --body "$BODY" \
+          || echo "gh pr create failed (branch may have no commits vs main) — not fatal"
