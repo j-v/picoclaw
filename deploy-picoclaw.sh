@@ -331,7 +331,8 @@ deploy() {
   if check_health "$HEALTH_RETRIES"; then
     log "✅  All health checks passed"
   else
-    log "❌  Health check failed — rolling back..."
+    log "❌  Health check failed — marking run failed + rolling back..."
+    mark_failed "$run_id"
     rollback "$timestamp"
     rm -rf "$tmp_dir"
     return 1
