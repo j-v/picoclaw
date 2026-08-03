@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1163,5 +1164,82 @@ func TestSeahorseSummarizeSkipsCondensedWhenBelowThreshold(t *testing.T) {
 
 	if tokensBefore < threshold && condensedCount > 0 {
 		t.Errorf("BUG: condensed created when tokens (%d) < threshold (%d)", tokensBefore, threshold)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Routed-agent regression tests (issue #3301)
+// ---------------------------------------------------------------------------
+
+// routedSeahorseConfig returns a two-agent config (main default + support
+// routed) sharing the given workspace root. ctxManager "" selects the legacy
+// manager; "seahorse" selects the seahorse context manager.
+func routedSeahorseConfig(workspace, ctxManager string) *config.Config {
+	return &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         filepath.Join(workspace, "main"),
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+				ContextManager:    ctxManager,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Workspace: filepath.Join(workspace, "main")},
+				{ID: "support", Workspace: filepath.Join(workspace, "support")},
+			},
+		},
+	}
+}
+
+// TestSeahorseBootstrap_RoutedAgent guards the seahorse startup bootstrap bug:
+// the constructor must import pre-existing history for ALL registered agents,
+// not just the default agent's store. Without the fix, a routed agent's
+// pre-existing JSONL history is never imported, so its first seahorse turn
+// starts with empty context.
+func TestSeahorseBootstrap_RoutedAgent(t *testing.T) {
+	workspace := t.TempDir()
+
+	// Phase 1: seed routed-agent history on disk (legacy manager).
+	seedCfg := routedSeahorseConfig(workspace, "")
+	al1 := NewAgentLoop(seedCfg, bus.NewMessageBus(), &seahorseTestProvider{})
+	support1, ok := al1.registry.GetAgent("support")
+	if !ok || support1 == nil {
+		t.Fatal("expected support agent")
+	}
+	key := routedSessionKey(t, al1, "support")
+
+	history := []providers.Message{
+		{Role: "user", Content: "what did I want before ice cream?"},
+		{Role: "assistant", Content: "you wanted a hot dog"},
+	}
+	support1.Sessions.SetHistory(key, history)
+	if err := support1.Sessions.Save(key); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Phase 2: construct a seahorse-backed loop against the same workspaces.
+	// The constructor bootstraps pre-existing sessions into SQLite.
+	seahorseCfg := routedSeahorseConfig(workspace, "seahorse")
+	al2 := NewAgentLoop(seahorseCfg, bus.NewMessageBus(), &seahorseTestProvider{})
+	seahorseCM, ok := al2.contextManager.(*seahorseContextManager)
+	if !ok {
+		t.Fatal("expected seahorseContextManager")
+	}
+
+	resp, err := seahorseCM.Assemble(context.Background(), &AssembleRequest{
+		SessionKey: key,
+		Budget:     100000,
+		MaxTokens:  4096,
+	})
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if len(resp.History) != len(history) {
+		t.Fatalf("seahorse history = %d messages, want %d (routed agent sessions must be bootstrapped)",
+			len(resp.History), len(history))
+	}
+	if resp.History[0].Content != history[0].Content {
+		t.Fatalf("history[0] = %q, want %q", resp.History[0].Content, history[0].Content)
 	}
 }
