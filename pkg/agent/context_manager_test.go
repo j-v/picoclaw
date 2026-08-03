@@ -15,6 +15,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	runtimeevents "github.com/sipeed/picoclaw/pkg/events"
 	"github.com/sipeed/picoclaw/pkg/providers"
+	"github.com/sipeed/picoclaw/pkg/session"
 )
 
 // ---------------------------------------------------------------------------
@@ -873,4 +874,210 @@ func testConfig(t *testing.T) *config.Config {
 func newCMTestAgentLoop(cfg *config.Config) *AgentLoop {
 	msgBus := bus.NewMessageBus()
 	return NewAgentLoop(cfg, msgBus, &simpleMockProvider{response: "test"})
+}
+
+// ---------------------------------------------------------------------------
+// Routed-agent regression tests (issue #3301)
+// ---------------------------------------------------------------------------
+//
+// These tests mirror the dispatch setup from
+// TestClearCommandRoutedAgentCallsContextManagerClear: a default agent ("main")
+// and a routed agent ("support"), with history seeded ONLY into the routed
+// agent's session store. The legacy context manager must resolve session
+// ownership via agentForSession instead of assuming GetDefaultAgent(), or the
+// routed store is invisible to Assemble / maybeSummarize / forceCompression.
+
+// newRoutedCMTestAgentLoop builds an AgentLoop with a default agent (main) and
+// a routed agent (support). defaults may override AgentDefaults (e.g. a low
+// SummarizeMessageThreshold); nil means the standard test defaults.
+func newRoutedCMTestAgentLoop(t *testing.T, defaults *config.AgentDefaults) *AgentLoop {
+	t.Helper()
+	workspace := t.TempDir()
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:         filepath.Join(workspace, "main"),
+				ModelName:         "test-model",
+				MaxTokens:         4096,
+				MaxToolIterations: 10,
+			},
+			List: []config.AgentConfig{
+				{ID: "main", Default: true, Workspace: filepath.Join(workspace, "main")},
+				{ID: "support", Workspace: filepath.Join(workspace, "support")},
+			},
+		},
+		Session: config.SessionConfig{
+			Dimensions: []string{"chat"},
+		},
+	}
+	if defaults != nil {
+		cfg.Agents.Defaults = *defaults
+	}
+	msgBus := bus.NewMessageBus()
+	return NewAgentLoop(cfg, msgBus, &simpleMockProvider{response: "summary"})
+}
+
+// routedSessionKey builds an opaque session key scoped to the given agent and
+// registers its scope metadata on that agent's store so agentForSession can
+// resolve ownership (the same resolution Clear() relies on).
+func routedSessionKey(t *testing.T, al *AgentLoop, agentID string) string {
+	t.Helper()
+	agent, ok := al.registry.GetAgent(agentID)
+	if !ok || agent == nil {
+		t.Fatalf("expected agent %q in registry", agentID)
+	}
+	scope := &session.SessionScope{
+		Version:    session.ScopeVersionV1,
+		AgentID:    agentID,
+		Channel:    "cli",
+		Account:    "default",
+		Dimensions: []string{"chat"},
+		Values: map[string]string{
+			"chat": "direct:user1",
+		},
+	}
+	key := session.BuildSessionKey(*scope)
+	ensureSessionMetadata(agent.Sessions, key, scope, nil)
+	return key
+}
+
+// TestLegacyAssemble_RoutedAgent guards the routed-chat statelessness bug:
+// Assemble must read history/summary from the routed agent's session store,
+// not the default agent's store.
+func TestLegacyAssemble_RoutedAgent(t *testing.T) {
+	al := newRoutedCMTestAgentLoop(t, nil)
+	support, ok := al.registry.GetAgent("support")
+	if !ok || support == nil {
+		t.Fatal("expected support agent")
+	}
+	key := routedSessionKey(t, al, "support")
+
+	history := []providers.Message{
+		{Role: "user", Content: "what did I want before ice cream?"},
+		{Role: "assistant", Content: "you wanted a hot dog"},
+	}
+	support.Sessions.SetHistory(key, history)
+	support.Sessions.SetSummary(key, "early summary")
+	if err := support.Sessions.Save(key); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	resp, err := al.contextManager.Assemble(context.Background(), &AssembleRequest{SessionKey: key})
+	if err != nil {
+		t.Fatalf("Assemble() error = %v", err)
+	}
+	if len(resp.History) != len(history) {
+		t.Fatalf("Assemble() history = %d messages, want %d (routed agent history must be loaded)",
+			len(resp.History), len(history))
+	}
+	if resp.History[0].Content != history[0].Content {
+		t.Fatalf("history[0] = %q, want %q", resp.History[0].Content, history[0].Content)
+	}
+	if resp.Summary != "early summary" {
+		t.Fatalf("Assemble() summary = %q, want %q", resp.Summary, "early summary")
+	}
+}
+
+// TestLegacyCompact_Summarize_RoutedAgent guards the routed-chat
+// auto-compression bug: maybeSummarize must count messages in the routed
+// agent's store and summarize against the routed agent.
+func TestLegacyCompact_Summarize_RoutedAgent(t *testing.T) {
+	al := newRoutedCMTestAgentLoop(t, &config.AgentDefaults{
+		ContextWindow:             8000,
+		SummarizeMessageThreshold: 2,
+		SummarizeTokenPercent:     75,
+	})
+	support, ok := al.registry.GetAgent("support")
+	if !ok || support == nil {
+		t.Fatal("expected support agent")
+	}
+	key := routedSessionKey(t, al, "support")
+
+	// 6 messages > threshold of 2
+	history := []providers.Message{
+		{Role: "user", Content: "q1"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "q2"},
+		{Role: "assistant", Content: "a2"},
+		{Role: "user", Content: "q3"},
+		{Role: "assistant", Content: "a3"},
+	}
+	support.Sessions.SetHistory(key, history)
+
+	runtimeCh, closeRuntimeEvents := subscribeRuntimeEventsForTest(
+		t,
+		al,
+		16,
+		runtimeevents.KindAgentSessionSummarize,
+	)
+	defer closeRuntimeEvents()
+
+	err := al.contextManager.Compact(context.Background(), &CompactRequest{
+		SessionKey: key,
+		Reason:     ContextCompressReasonSummarize,
+	})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+
+	waitForRuntimeEvent(t, runtimeCh, 5*time.Second, func(evt runtimeevents.Event) bool {
+		return evt.Kind == runtimeevents.KindAgentSessionSummarize
+	})
+
+	newHistory := support.Sessions.GetHistory(key)
+	if len(newHistory) >= len(history) {
+		t.Fatalf("expected summarization to reduce routed history from %d messages, got %d",
+			len(history), len(newHistory))
+	}
+	if summary := support.Sessions.GetSummary(key); summary == "" {
+		t.Fatal("expected summary written to routed agent's store")
+	}
+}
+
+// TestLegacyCompact_Overflow_RoutedAgent guards forceCompression: overflow
+// compression must drop oldest turns in the routed agent's store and leave the
+// default agent's store untouched.
+func TestLegacyCompact_Overflow_RoutedAgent(t *testing.T) {
+	al := newRoutedCMTestAgentLoop(t, nil)
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("expected default agent")
+	}
+	support, ok := al.registry.GetAgent("support")
+	if !ok || support == nil {
+		t.Fatal("expected support agent")
+	}
+	key := routedSessionKey(t, al, "support")
+
+	history := []providers.Message{
+		{Role: "user", Content: "msg 1"},
+		{Role: "assistant", Content: "resp 1"},
+		{Role: "user", Content: "msg 2"},
+		{Role: "assistant", Content: "resp 2"},
+		{Role: "user", Content: "msg 3"},
+	}
+	support.Sessions.SetHistory(key, history)
+
+	err := al.contextManager.Compact(context.Background(), &CompactRequest{
+		SessionKey: key,
+		Reason:     ContextCompressReasonRetry,
+	})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+
+	newHistory := support.Sessions.GetHistory(key)
+	if len(newHistory) >= len(history) {
+		t.Fatalf("expected compressed routed history, got %d messages (was %d)",
+			len(newHistory), len(history))
+	}
+	summary := support.Sessions.GetSummary(key)
+	if !strings.Contains(summary, "Emergency compression") {
+		t.Fatalf("expected compression note in routed summary, got %q", summary)
+	}
+
+	// The default agent's store must not be touched by routed compression.
+	if h := defaultAgent.Sessions.GetHistory(key); len(h) != 0 {
+		t.Fatalf("default agent store unexpectedly has %d messages for routed key", len(h))
+	}
 }
