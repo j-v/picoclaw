@@ -32,6 +32,7 @@ on:
       - '.github/workflows/**'
       - 'deploy-picoclaw.sh'
       - 'setup-picoclaw.sh'
+      - 'scripts/setup-picoclaw.sh'
   workflow_dispatch:
     inputs:
       ref:
