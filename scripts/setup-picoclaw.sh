@@ -49,9 +49,8 @@ if ! gh auth status >/dev/null 2>&1; then
     gh auth login --hostname github.com --git-protocol https --with-token < "$HOME/.picoclaw/gh-token.txt"
     rm -f "$HOME/.picoclaw/gh-token.txt"   # token now lives in ~/.config/gh/ (per plan)
     echo "   ✔️  Token imported; plaintext file removed"
-  else
-    echo ""
-    echo "❌ gh is not authenticated, and no deploy token found at ~/.picoclaw/gh-token.txt"
+  elif [ -t 0 ]; then
+    echo "--- gh auth login (interactive — paste your fine-grained PAT) ---"
     echo ""
     echo "   Create a fine-grained PAT (NOT a browser login — the Pi must not hold your full account):"
     echo "     GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token"
@@ -62,7 +61,32 @@ if ! gh auth status >/dev/null 2>&1; then
     echo "         Pull requests: LEAVE UNSET    (auto-pr workflow opens PRs; agent needs NO PR write)"
     echo "     - Expiration: 90 days (or shorter)"
     echo ""
-    echo "   Save the token to ~/.picoclaw/gh-token.txt and re-run this script."
+    echo -n "   Paste token (input hidden): "
+    IFS= read -r -s GH_TOKEN_INPUT
+    echo ""
+    if [ -z "$GH_TOKEN_INPUT" ]; then
+      echo "   ❌ No token entered — re-run the script and paste your token."
+      exit 1
+    fi
+    # Token crosses stdin only; nothing is written to disk.
+    printf '%s\n' "$GH_TOKEN_INPUT" | gh auth login --hostname github.com --git-protocol https --with-token
+    unset GH_TOKEN_INPUT
+    echo "   ✔️  Token imported via 'gh auth login --with-token' (nothing written to disk)"
+  else
+    echo ""
+    echo "❌ gh is not authenticated, no deploy token file, and stdin is not a terminal"
+    echo ""
+    echo "   Create a fine-grained PAT (NOT a browser login — the Pi must not hold your full account):"
+    echo "     GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token"
+    echo "     - Repository access: Only select repositories → j-v/picoclaw"
+    echo "     - Repository permissions:"
+    echo "         Actions:  Read-only           (watchdog polls builds + downloads artifacts)"
+    echo "         Contents: Read and write      (agent pushes feature branches)"
+    echo "         Pull requests: LEAVE UNSET    (auto-pr workflow opens PRs; agent needs NO PR write)"
+    echo "     - Expiration: 90 days (or shorter)"
+    echo ""
+    echo "   Run this script from an interactive SSH session and paste the token"
+    echo "   when prompted, or save it to ~/.picoclaw/gh-token.txt for a non-interactive run."
     echo ""
     exit 1
   fi
