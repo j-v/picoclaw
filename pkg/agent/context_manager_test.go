@@ -877,7 +877,7 @@ func newCMTestAgentLoop(cfg *config.Config) *AgentLoop {
 }
 
 // ---------------------------------------------------------------------------
-// Routed-agent regression tests (issue #3301)
+// Routed-agent regression tests
 // ---------------------------------------------------------------------------
 //
 // These tests mirror the dispatch setup from
@@ -941,7 +941,6 @@ func routedSessionKey(t *testing.T, al *AgentLoop, agentID string) string {
 	return key
 }
 
-// TestLegacyAssemble_RoutedAgent guards the routed-chat statelessness bug:
 // Assemble must read history/summary from the routed agent's session store,
 // not the default agent's store.
 func TestLegacyAssemble_RoutedAgent(t *testing.T) {
@@ -978,8 +977,7 @@ func TestLegacyAssemble_RoutedAgent(t *testing.T) {
 	}
 }
 
-// TestLegacyCompact_Summarize_RoutedAgent guards the routed-chat
-// auto-compression bug: maybeSummarize must count messages in the routed
+// maybeSummarize must count messages in the routed
 // agent's store and summarize against the routed agent.
 func TestLegacyCompact_Summarize_RoutedAgent(t *testing.T) {
 	al := newRoutedCMTestAgentLoop(t, &config.AgentDefaults{

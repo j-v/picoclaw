@@ -1168,12 +1168,13 @@ func TestSeahorseSummarizeSkipsCondensedWhenBelowThreshold(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Routed-agent regression tests (issue #3301)
+// Routed-agent regression tests
 // ---------------------------------------------------------------------------
 
 // routedSeahorseConfig returns a two-agent config (main default + support
-// routed) sharing the given workspace root. ctxManager "" selects the legacy
-// manager; "seahorse" selects the seahorse context manager.
+// routed) sharing the given workspace root.
+// ctxManager "" selects the legacy manager; "seahorse" selects the seahorse 
+// context manager.
 func routedSeahorseConfig(workspace, ctxManager string) *config.Config {
 	return &config.Config{
 		Agents: config.AgentsConfig{
@@ -1192,11 +1193,8 @@ func routedSeahorseConfig(workspace, ctxManager string) *config.Config {
 	}
 }
 
-// TestSeahorseBootstrap_RoutedAgent guards the seahorse startup bootstrap bug:
-// the constructor must import pre-existing history for ALL registered agents,
-// not just the default agent's store. Without the fix, a routed agent's
-// pre-existing JSONL history is never imported, so its first seahorse turn
-// starts with empty context.
+// The constructor must import pre-existing history for ALL registered agents,
+// not just the default agent's store.
 func TestSeahorseBootstrap_RoutedAgent(t *testing.T) {
 	workspace := t.TempDir()
 
