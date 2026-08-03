@@ -670,8 +670,12 @@ func TestShellTool_CustomAllowPatterns(t *testing.T) {
 		t.Fatalf("unable to configure exec tool: %s", err)
 	}
 
+	ctx := WithToolContext(context.Background(), "cli", "test")
+
 	// "git push origin main" should be allowed by custom allow pattern.
-	result := tool.Execute(context.Background(), map[string]any{
+	// It may fail for other reasons (no git repo), but the error should not be a guard block.
+	result := tool.Execute(ctx, map[string]any{
+		"action":  "run",
 		"command": "git push origin main",
 	})
 	if result.IsError && strings.Contains(result.ForLLM, "blocked") {
@@ -679,11 +683,32 @@ func TestShellTool_CustomAllowPatterns(t *testing.T) {
 	}
 
 	// "git push upstream main" should still be blocked (does not match allow pattern).
-	result = tool.Execute(context.Background(), map[string]any{
+	result = tool.Execute(ctx, map[string]any{
+		"action":  "run",
 		"command": "git push upstream main",
 	})
-	if !result.IsError {
-		t.Errorf("'git push upstream main' should still be blocked by deny pattern")
+	if !result.IsError || !strings.Contains(result.ForLLM, "blocked") {
+		t.Errorf("'git push upstream main' should still be blocked by deny pattern, got: %s", result.ForLLM)
+	}
+
+	// Without any custom allow pattern, "git push origin main" should be blocked.
+	cfgNoAllow := &config.Config{
+		Tools: config.ToolsConfig{
+			Exec: config.ExecConfig{
+				EnableDenyPatterns: true,
+			},
+		},
+	}
+	toolNoAllow, err := NewExecToolWithConfig("", false, cfgNoAllow)
+	if err != nil {
+		t.Fatalf("unable to configure exec tool: %s", err)
+	}
+	result = toolNoAllow.Execute(ctx, map[string]any{
+		"action":  "run",
+		"command": "git push origin main",
+	})
+	if !result.IsError || !strings.Contains(result.ForLLM, "blocked") {
+		t.Errorf("'git push origin main' should be blocked without custom allow pattern, got: %s", result.ForLLM)
 	}
 }
 
