@@ -183,7 +183,7 @@ func TestDownloadAndDecryptCDNBufferFallsBackToConstructedURLWhenFullURLFails(t 
 }
 
 func TestBuildCDNDownloadURLEscapesOpaqueToken(t *testing.T) {
-	token := "MFcCAQAESzBJAgEAAgSieMV9AgM9CcwCBEoKPqICBGnHZB0EJDk4OWY5YWU0LTc4OGItNGQ5Ni1iMjZhLWU4YjhlMmEwOWVkZgIEIR0IAgIBAAQFAExUPQA%3D"
+	token := "MFcCAQAESzBJAgEAAgSieMV9AgM9CcwCBEoKPqICBGnHZB0EJDk4OWY5YWU0LTc4OGItNGQ5Ni1iMjZhLWU4YjhlMmEwOWVkZgIEIR0IAgIBAAQFAExUPQA%3D" // gitleaks:allow test fixture token
 
 	got := buildCDNDownloadURL("https://cdn.example.com", token)
 
