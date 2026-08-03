@@ -398,6 +398,8 @@ func launcherAllowlistBypassLogPolicy(
 }
 
 func main() {
+	// NOTE: the deploy watchdog health check requires this process to bind
+	// :18800 and stay alive — do not exit early before the listener starts.
 	port := flag.String("port", "18800", "Port to listen on")
 	host := flag.String("host", "", "Host to listen on (overrides -public when set)")
 	public := flag.Bool("public", false, "Listen on all interfaces (dual-stack) instead of localhost only")
