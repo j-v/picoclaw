@@ -30,6 +30,8 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/**'
+      - 'deploy-picoclaw.sh'
+      - 'setup-picoclaw.sh'
   workflow_dispatch:
     inputs:
       ref:
