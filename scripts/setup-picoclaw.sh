@@ -5,7 +5,7 @@
 # Run ONCE from an interactive SSH session on the Pi:
 #   cd ~/src/picoclaw && bash scripts/setup-picoclaw.sh
 #
-# It needs sudo (first TWO commands only), a GitHub fine-grained PAT
+# It needs sudo (first THREE steps only: 0, 1, 2b), a GitHub fine-grained PAT
 # (saved at ~/.picoclaw/gh-token.txt — no interactive login), and your
 # hands (deploy key paste, autostart edit).
 # After this step, everything else is automated.
@@ -123,6 +123,21 @@ fi
 ln -sfn "$STABLE_DIR" "$PIPELINE_DIR/current"
 ls -la "$STABLE_DIR/"
 echo "   ✔️  stable snapshot + current symlink (→ stable)"
+
+# ------------------------------------------------------------
+# 2b. Point the picoclaw CLI at the pipeline release (3rd/LAST sudo)
+#     /usr/local/bin/picoclaw -> /opt/picoclaw/current/picoclaw
+#     'current' is swapped by the watchdog on every deploy/rollback,
+#     so this one-time symlink always resolves to the latest release.
+# ------------------------------------------------------------
+echo ""
+echo "[2b/8] Pointing picoclaw CLI at pipeline release..."
+sudo ln -sfn "$PIPELINE_DIR/current/picoclaw" /usr/local/bin/picoclaw
+sudo ln -sfn "$PIPELINE_DIR/current/picoclaw-launcher" /usr/local/bin/picoclaw-launcher
+ls -la /usr/local/bin/picoclaw /usr/local/bin/picoclaw-launcher
+echo "   ✔️  /usr/local/bin/picoclaw → /opt/picoclaw/current/picoclaw (follows every deploy)"
+echo "   ✔️  /usr/local/bin/picoclaw-launcher → /opt/picoclaw/current/picoclaw-launcher"
+echo "       (on a fresh machine these dangle until the first deploy lands — expected)"
 
 # ------------------------------------------------------------
 # 3. Install the deploy watchdog script
