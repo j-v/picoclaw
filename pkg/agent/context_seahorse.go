@@ -188,7 +188,11 @@ func (m *seahorseContextManager) Clear(ctx context.Context, sessionKey string) e
 }
 
 // bootstrapSession reconciles JSONL session history into seahorse SQLite.
-func (m *seahorseContextManager) bootstrapSession(ctx context.Context, sessions session.SessionStore, sessionKey string) {
+func (m *seahorseContextManager) bootstrapSession(
+	ctx context.Context,
+	sessions session.SessionStore,
+	sessionKey string,
+) {
 	if sessions == nil {
 		return
 	}
