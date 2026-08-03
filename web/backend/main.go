@@ -398,7 +398,6 @@ func launcherAllowlistBypassLogPolicy(
 }
 
 func main() {
-	os.Exit(1) // DRILL: intentional launcher break — rollback drill (remove me)
 	port := flag.String("port", "18800", "Port to listen on")
 	host := flag.String("host", "", "Host to listen on (overrides -public when set)")
 	public := flag.Bool("public", false, "Listen on all interfaces (dual-stack) instead of localhost only")
