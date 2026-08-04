@@ -443,7 +443,7 @@ func TestThreadStartMessage(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/channels/parent-1/messages/thread-1":
 			w.Header().Set("Content-Type", "application/json")
 			const startJSON = `{"id":"thread-1","content":"hello from the start message",` +
-				`"author":{"username":"jonotron"}}`
+				`"author":{"username":"alice"}}`
 			_, _ = io.WriteString(w, startJSON)
 		case r.Method == http.MethodGet && r.URL.Path == "/channels/parent-2/messages/thread-2":
 			w.Header().Set("Content-Type", "application/json")
@@ -478,7 +478,7 @@ func TestThreadStartMessage(t *testing.T) {
 
 	// Success case: fetches the start message, resolves refs, formats it.
 	got := ch.threadStartMessage(session, "G001", "parent-1", "thread-1")
-	want := "[thread started from jonotron's message]: hello from the start message"
+	want := "[thread started from alice's message]: hello from the start message"
 	if got != want {
 		t.Fatalf("threadStartMessage() = %q, want %q", got, want)
 	}
@@ -510,7 +510,7 @@ func TestThreadStartMessage_ResolvesChannelRefs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && r.URL.Path == "/channels/parent-1/messages/thread-1" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"id":"thread-1","content":"see <#111222333>","author":{"username":"jonotron"}}`)
+			_, _ = io.WriteString(w, `{"id":"thread-1","content":"see <#111222333>","author":{"username":"alice"}}`)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -538,7 +538,7 @@ func TestThreadStartMessage_ResolvesChannelRefs(t *testing.T) {
 	ch := &DiscordChannel{session: session}
 
 	got := ch.threadStartMessage(session, "G001", "parent-1", "thread-1")
-	want := "[thread started from jonotron's message]: see #general"
+	want := "[thread started from alice's message]: see #general"
 	if got != want {
 		t.Fatalf("threadStartMessage() = %q, want %q", got, want)
 	}

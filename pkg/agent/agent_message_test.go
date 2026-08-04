@@ -17,7 +17,7 @@ func TestSeedThreadSessionFromStartMessage(t *testing.T) {
 		t.Fatal("expected default agent")
 	}
 
-	al.seedThreadSessionFromStartMessage(agent, "sk_thread", "[thread started from jonotron's message]: hello")
+	al.seedThreadSessionFromStartMessage(agent, "sk_thread", "[thread started from alice's message]: hello")
 
 	history := agent.Sessions.GetHistory("sk_thread")
 	if len(history) != 1 {
@@ -27,7 +27,7 @@ func TestSeedThreadSessionFromStartMessage(t *testing.T) {
 	if got.Role != "user" {
 		t.Fatalf("role = %q, want user", got.Role)
 	}
-	wantContent := "[thread started from jonotron's message]: hello"
+	wantContent := "[thread started from alice's message]: hello"
 	if got.Content != wantContent {
 		t.Fatalf("content = %q, want %q", got.Content, wantContent)
 	}
@@ -46,7 +46,7 @@ func TestSeedThreadSessionFromStartMessage_KeepsExistingHistory(t *testing.T) {
 	}
 
 	agent.Sessions.AddMessage("sk_thread", "user", "first message in thread")
-	al.seedThreadSessionFromStartMessage(agent, "sk_thread", "[thread started from jonotron's message]: hello")
+	al.seedThreadSessionFromStartMessage(agent, "sk_thread", "[thread started from alice's message]: hello")
 
 	history := agent.Sessions.GetHistory("sk_thread")
 	if len(history) != 1 {
@@ -91,12 +91,12 @@ func TestSeedThreadSessionFromStartMessage_TrimmedInput(t *testing.T) {
 		t.Fatal("expected default agent")
 	}
 
-	al.seedThreadSessionFromStartMessage(agent, "sk_thread", "  [thread started from jonotron's message]: hello  ")
+	al.seedThreadSessionFromStartMessage(agent, "sk_thread", "  [thread started from alice's message]: hello  ")
 	history := agent.Sessions.GetHistory("sk_thread")
 	if len(history) != 1 {
 		t.Fatalf("history = %d messages, want 1", len(history))
 	}
-	if got := history[0].Content; got != "[thread started from jonotron's message]: hello" {
+	if got := history[0].Content; got != "[thread started from alice's message]: hello" {
 		t.Fatalf("content = %q, want trimmed start message", got)
 	}
 }
