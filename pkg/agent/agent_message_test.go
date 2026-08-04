@@ -8,7 +8,8 @@ import (
 // seeded with the parent-channel message it was created from when it has no
 // history yet.
 func TestSeedThreadSessionFromStartMessage(t *testing.T) {
-	al, _, _, _, cleanup := newTestAgentLoop(t)
+	al, cfg, _, _, cleanup := newTestAgentLoop(t)
+	_ = cfg
 	defer cleanup()
 
 	agent := al.registry.GetDefaultAgent()
@@ -35,7 +36,8 @@ func TestSeedThreadSessionFromStartMessage(t *testing.T) {
 // TestSeedThreadSessionFromStartMessage_KeepsExistingHistory verifies that an
 // already-active thread session is not re-seeded on later messages.
 func TestSeedThreadSessionFromStartMessage_KeepsExistingHistory(t *testing.T) {
-	al, _, _, _, cleanup := newTestAgentLoop(t)
+	al, cfg, _, _, cleanup := newTestAgentLoop(t)
+	_ = cfg
 	defer cleanup()
 
 	agent := al.registry.GetDefaultAgent()
@@ -58,7 +60,8 @@ func TestSeedThreadSessionFromStartMessage_KeepsExistingHistory(t *testing.T) {
 // TestSeedThreadSessionFromStartMessage_EmptyStart verifies no-op cases: empty
 // start message, nil agent, nil session store.
 func TestSeedThreadSessionFromStartMessage_EmptyStart(t *testing.T) {
-	al, _, _, _, cleanup := newTestAgentLoop(t)
+	al, cfg, _, _, cleanup := newTestAgentLoop(t)
+	_ = cfg
 	defer cleanup()
 
 	agent := al.registry.GetDefaultAgent()
@@ -79,7 +82,8 @@ func TestSeedThreadSessionFromStartMessage_EmptyStart(t *testing.T) {
 // TestSeedThreadSessionFromStartMessage_TrimmedInput verifies whitespace-only
 // start messages are treated as absent (trimmed before seeding).
 func TestSeedThreadSessionFromStartMessage_TrimmedInput(t *testing.T) {
-	al, _, _, _, cleanup := newTestAgentLoop(t)
+	al, cfg, _, _, cleanup := newTestAgentLoop(t)
+	_ = cfg
 	defer cleanup()
 
 	agent := al.registry.GetDefaultAgent()
