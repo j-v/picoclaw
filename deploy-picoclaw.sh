@@ -21,6 +21,7 @@ STABLE_DIR="/opt/picoclaw/stable"         # 🛟 Known-good fallback (never prun
 CURRENT_LINK="/opt/picoclaw/current"       # 🔀 Symlink to active release
 STATE_FILE="/opt/picoclaw/.last-deployed-run"
 FAILED_STATE_FILE="/opt/picoclaw/.failed-runs"   # run-id + failure count — permanently skipped after threshold
+SKIPPED_STATE_FILE="/opt/picoclaw/.skipped-runs" # run-ids with NO artifact — intentional no-op builds, not failures
 MARK_FAILED_THRESHOLD=2        # retry-once: permanently skip only after this many consecutive failures
 GH_ARTIFACT_NAME="picoclaw-linux-arm64"
 SERVICE="picoclaw-launcher"               # user systemd service name (--user)
@@ -153,6 +154,39 @@ clear_failed() {
   mv "${FAILED_STATE_FILE}.tmp" "$FAILED_STATE_FILE" 2>/dev/null || true
 }
 
+# True if the run was recorded as an intentional no-op (no build artifact).
+# Builds only run when build-relevant files changed, so docs/scripts-only
+# merges produce successful runs with NO artifact — that's not a failure, just
+# "nothing to deploy". Recorded so we don't re-check it every poll cycle.
+is_skipped() {
+  local run_id="$1"
+  [ -f "$SKIPPED_STATE_FILE" ] || return 1
+  grep -q "^$run_id$" "$SKIPPED_STATE_FILE" 2>/dev/null
+}
+
+# Record an intentional skip (successful run, no artifact)
+skip_run() {
+  local run_id="$1"
+  touch "$SKIPPED_STATE_FILE"
+  grep -v "^$run_id$" "$SKIPPED_STATE_FILE" > "${SKIPPED_STATE_FILE}.tmp" 2>/dev/null || true
+  mv "${SKIPPED_STATE_FILE}.tmp" "$SKIPPED_STATE_FILE" 2>/dev/null || true
+  echo "$run_id" >> "$SKIPPED_STATE_FILE"
+}
+
+# Check whether a run produced a live (non-expired) build artifact.
+# Exit codes: 0 = has live artifact · 1 = no artifacts at all · 2 = API error
+#            3 = artifacts exist but all expired (retention is 1 day)
+run_artifact_status() {
+  local run_id="$1"
+  local json total live
+  json=$(gh api "repos/$REPO/actions/runs/$run_id/artifacts" 2>/dev/null) || return 2
+  total=$(echo "$json" | jq -r '.total_count // 0')
+  live=$(echo "$json" | jq '[.artifacts[] | select(.expired == false)] | length')
+  [ "$total" -le 0 ] && return 1
+  [ "$live" -le 0 ] && return 3
+  return 0
+}
+
 # ============================================================
 # Health check — verify launcher + gateway are both responsive
 # ============================================================
@@ -257,6 +291,25 @@ deploy() {
 
   log "=== Deploying run #$run_id ($(echo "$run_sha" | head -c 7)) ==="
 
+  # ── A successful run may have NO artifact (build skipped because no
+  #    build-relevant files changed — docs/scripts-only merges). That's
+  #    intentional, not a failure: record it as skipped and move on.
+  local artifact_rc=0
+  run_artifact_status "$run_id" || artifact_rc=$?
+  if [ "$artifact_rc" -eq 1 ]; then
+    log "   Run #$run_id succeeded but produced no artifact (no build-relevant changes) — skipping"
+    skip_run "$run_id"
+    notify "ℹ️ Deploy skipped: run #$run_id had no build artifact (docs/scripts-only change)"
+    return 0
+  fi
+  if [ "$artifact_rc" -eq 3 ]; then
+    log "⚠️  Run #$run_id artifact exists but expired (retention 1d) — marking failed (will retry)"
+    mark_failed "$run_id"
+    return 1
+  fi
+  # rc 0 → proceed with download; rc 2 (API error) → also proceed: the download
+  # step below will surface any real network/expiry problem the usual way.
+
   # --- Download artifact ---
   local tmp_dir
   tmp_dir=$(mktemp -d)
@@ -264,7 +317,7 @@ deploy() {
   log "   Downloading artifact..."
   if ! timeout "$DOWNLOAD_TIMEOUT" gh run download "$run_id" --repo "$REPO" --name "$GH_ARTIFACT_NAME" --dir "$tmp_dir" 2>/dev/null; then
     log "❌ Failed to download artifact for run #$run_id"
-    log "   (Likely expired — artifact retention is 1 day. Marking as skipped.)"
+    log "   (Likely expired — artifact retention is 1 day. Marking as failed, will retry.)"
     mark_failed "$run_id"
     rm -rf "$tmp_dir"
     return 1
@@ -384,7 +437,7 @@ tight_poll() {
     # Also check: did a different run complete while we were watching?
     local latest_success
     latest_success=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" --branch main --status success --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null)
-    if [ -n "$latest_success" ] && [ "$latest_success" != "$run_id" ] && ! is_failed "$latest_success"; then
+    if [ -n "$latest_success" ] && [ "$latest_success" != "$run_id" ] && ! is_failed "$latest_success" && ! is_skipped "$latest_success"; then
       if [ ! -f "$STATE_FILE" ] || [ "$(cat "$STATE_FILE")" != "$latest_success" ]; then
         log "⚠️  New successful run #$latest_success appeared while tracking #$run_id — deploying"
         deploy "$latest_success" ""
@@ -432,7 +485,7 @@ while true; do
     last_deployed=""
     [ -f "$STATE_FILE" ] && last_deployed=$(cat "$STATE_FILE")
 
-    if [ "$last_deployed" != "$success_id" ] && ! is_failed "$success_id"; then
+    if [ "$last_deployed" != "$success_id" ] && ! is_failed "$success_id" && ! is_skipped "$success_id"; then
       deploy "$success_id" "$success_sha"
       continue  # re-check immediately after deploy
     fi
