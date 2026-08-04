@@ -231,3 +231,76 @@ func TestResolveRoute_NoDefaultUsesFirst(t *testing.T) {
 		t.Errorf("AgentID = %q, want 'alpha' (first in list)", route.AgentID)
 	}
 }
+
+func TestResolveRoute_ThreadParentRoutingMatchesParentChannel(t *testing.T) {
+	cfg := testConfig([]config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "support"},
+	})
+	cfg.Agents.Dispatch = &config.DispatchConfig{
+		Rules: []config.DispatchRule{
+			{
+				Name:  "discord-support-channel",
+				Agent: "support",
+				When: config.DispatchSelector{
+					Channel: "discord",
+					Chat:    "channel:111222333",
+				},
+			},
+		},
+	}
+	r := NewRouteResolver(cfg)
+
+	// Message posted inside a thread whose parent channel matches the rule.
+	route := r.ResolveRoute(bus.InboundContext{
+		Channel:      "discord",
+		ChatID:       "999888777", // thread ID
+		ChatType:     "channel",
+		SpaceID:      "G001",
+		SpaceType:    "guild",
+		ParentChatID: "111222333", // parent channel ID
+		SenderID:     "U123",
+	})
+
+	if route.AgentID != "support" {
+		t.Fatalf("AgentID = %q, want support (parent channel rule should match)", route.AgentID)
+	}
+	if route.MatchedBy != "dispatch.rule:discord-support-channel" {
+		t.Fatalf("MatchedBy = %q, want dispatch.rule:discord-support-channel", route.MatchedBy)
+	}
+}
+
+func TestResolveRoute_ThreadParentRoutingFallsBackToThreadID(t *testing.T) {
+	cfg := testConfig([]config.AgentConfig{
+		{ID: "main", Default: true},
+		{ID: "support"},
+	})
+	cfg.Agents.Dispatch = &config.DispatchConfig{
+		Rules: []config.DispatchRule{
+			{
+				Name:  "discord-support-channel",
+				Agent: "support",
+				When: config.DispatchSelector{
+					Channel: "discord",
+					Chat:    "channel:111222333",
+				},
+			},
+		},
+	}
+	r := NewRouteResolver(cfg)
+
+	// No ParentChatID: matching uses the thread ID itself, so the parent
+	// channel rule does not match and the default agent is selected.
+	route := r.ResolveRoute(bus.InboundContext{
+		Channel:   "discord",
+		ChatID:    "999888777", // thread ID
+		ChatType:  "channel",
+		SpaceID:   "G001",
+		SpaceType: "guild",
+		SenderID:  "U123",
+	})
+
+	if route.AgentID != "main" {
+		t.Fatalf("AgentID = %q, want main (no parent chat -> thread ID used)", route.AgentID)
+	}
+}

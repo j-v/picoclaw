@@ -36,6 +36,7 @@ func (ctx InboundContext) isZero() bool {
 		ctx.ChatID == "" &&
 		ctx.ChatType == "" &&
 		ctx.TopicID == "" &&
+		ctx.ParentChatID == "" &&
 		ctx.SpaceID == "" &&
 		ctx.SpaceType == "" &&
 		ctx.SenderID == "" &&
@@ -53,6 +54,7 @@ func normalizeInboundContext(ctx InboundContext) InboundContext {
 	ctx.ChatID = strings.TrimSpace(ctx.ChatID)
 	ctx.ChatType = normalizeKind(ctx.ChatType)
 	ctx.TopicID = strings.TrimSpace(ctx.TopicID)
+	ctx.ParentChatID = strings.TrimSpace(ctx.ParentChatID)
 	ctx.SpaceID = strings.TrimSpace(ctx.SpaceID)
 	ctx.SpaceType = normalizeKind(ctx.SpaceType)
 	ctx.SenderID = strings.TrimSpace(ctx.SenderID)

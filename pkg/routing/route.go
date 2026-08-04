@@ -227,7 +227,15 @@ func buildDispatchView(inbound bus.InboundContext, identityLinks map[string][]st
 		view.Space = fmt.Sprintf("%s:%s", spaceType, strings.ToLower(spaceID))
 	}
 
-	if chatID := strings.TrimSpace(inbound.ChatID); chatID != "" {
+	// Dispatch matching uses the parent chat when one is present (e.g. a
+	// Discord thread routed to its parent channel). Session allocation is
+	// unaffected — it still keys on inbound.ChatID, so threads keep their own
+	// history with the routed agent.
+	chatID := strings.TrimSpace(inbound.ChatID)
+	if parentID := strings.TrimSpace(inbound.ParentChatID); parentID != "" {
+		chatID = parentID
+	}
+	if chatID != "" {
 		chatType := strings.ToLower(strings.TrimSpace(inbound.ChatType))
 		if chatType == "" {
 			chatType = "direct"

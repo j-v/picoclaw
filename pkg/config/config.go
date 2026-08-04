@@ -563,6 +563,11 @@ type DiscordSettings struct {
 	Token       SecureString `json:"token,omitzero" yaml:"token,omitempty" env:"PICOCLAW_CHANNELS_DISCORD_TOKEN"`
 	Proxy       string       `json:"proxy"          yaml:"-"               env:"PICOCLAW_CHANNELS_DISCORD_PROXY"`
 	MentionOnly bool         `json:"mention_only"   yaml:"-"               env:"PICOCLAW_CHANNELS_DISCORD_MENTION_ONLY"`
+
+	// ThreadParentRouting dispatches messages posted in a thread using the
+	// thread's parent channel for rule matching (default false). Sessions are
+	// still allocated per-thread, so history stays independent.
+	ThreadParentRouting bool `json:"thread_parent_routing,omitempty" yaml:"-" env:"PICOCLAW_CHANNELS_DISCORD_THREAD_PARENT_ROUTING"`
 }
 
 type MaixCamSettings struct {

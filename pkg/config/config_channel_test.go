@@ -249,6 +249,70 @@ func TestInitChannelList_TelegramStreamingEnvCompatibility(t *testing.T) {
 	assert.Equal(t, 0, picoCfg.Streaming.MinGrowthChars)
 }
 
+func TestInitChannelList_DiscordThreadParentRouting(t *testing.T) {
+	t.Run("env override enables", func(t *testing.T) {
+		t.Setenv("PICOCLAW_CHANNELS_DISCORD_THREAD_PARENT_ROUTING", "true")
+
+		channels := ChannelsConfig{
+			"discord": {
+				Type:     ChannelDiscord,
+				Enabled:  true,
+				Settings: RawNode(`{"token":"discord-token"}`),
+			},
+		}
+		if err := InitChannelList(channels); err != nil {
+			t.Fatalf("InitChannelList() error = %v", err)
+		}
+
+		decoded, err := channels["discord"].GetDecoded()
+		if err != nil {
+			t.Fatalf("discord GetDecoded() error = %v", err)
+		}
+		discCfg := decoded.(*DiscordSettings)
+		assert.True(t, discCfg.ThreadParentRouting)
+	})
+
+	t.Run("json setting enables", func(t *testing.T) {
+		channels := ChannelsConfig{
+			"discord": {
+				Type:     ChannelDiscord,
+				Enabled:  true,
+				Settings: RawNode(`{"token":"discord-token","thread_parent_routing":true}`),
+			},
+		}
+		if err := InitChannelList(channels); err != nil {
+			t.Fatalf("InitChannelList() error = %v", err)
+		}
+
+		decoded, err := channels["discord"].GetDecoded()
+		if err != nil {
+			t.Fatalf("discord GetDecoded() error = %v", err)
+		}
+		discCfg := decoded.(*DiscordSettings)
+		assert.True(t, discCfg.ThreadParentRouting)
+	})
+
+	t.Run("default off", func(t *testing.T) {
+		channels := ChannelsConfig{
+			"discord": {
+				Type:     ChannelDiscord,
+				Enabled:  true,
+				Settings: RawNode(`{"token":"discord-token"}`),
+			},
+		}
+		if err := InitChannelList(channels); err != nil {
+			t.Fatalf("InitChannelList() error = %v", err)
+		}
+
+		decoded, err := channels["discord"].GetDecoded()
+		if err != nil {
+			t.Fatalf("discord GetDecoded() error = %v", err)
+		}
+		discCfg := decoded.(*DiscordSettings)
+		assert.False(t, discCfg.ThreadParentRouting)
+	})
+}
+
 func TestInitChannelList_RejectsNegativeStreamingDeliveryValues(t *testing.T) {
 	tests := []struct {
 		name        string

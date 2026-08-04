@@ -100,6 +100,35 @@ func TestPublishInbound_NormalizesContext(t *testing.T) {
 	}
 }
 
+func TestPublishInbound_NormalizesParentChatID(t *testing.T) {
+	mb := NewMessageBus()
+	defer mb.Close()
+
+	msg := InboundMessage{
+		Context: InboundContext{
+			Channel:      "discord",
+			ChatID:       "111222333",
+			ChatType:     "channel",
+			ParentChatID: " 999888777 ",
+			SenderID:     "U123",
+			MessageID:    "m1",
+		},
+		Content: "hello from a thread",
+	}
+
+	if err := mb.PublishInbound(context.Background(), msg); err != nil {
+		t.Fatalf("PublishInbound failed: %v", err)
+	}
+
+	got := <-mb.InboundChan()
+	if got.Context.ParentChatID != "999888777" {
+		t.Fatalf("expected parent chat 999888777 (trimmed), got %q", got.Context.ParentChatID)
+	}
+	if got.Context.ChatID != "111222333" {
+		t.Fatalf("expected chat 111222333, got %q", got.Context.ChatID)
+	}
+}
+
 func TestPublishInbound_MirrorsContextIntoConvenienceFields(t *testing.T) {
 	mb := NewMessageBus()
 	defer mb.Close()
