@@ -1,12 +1,11 @@
-# PicoClaw Self-Deploy Pipeline — Complete Setup & Self-Authoring Guide (v3)
+# PicoClaw Self-Deploy Pipeline — Complete Setup & Self-Authoring Guide
 
 > **Who this is for:** you're setting up the pipeline for the first time, and
 > you want the primary day-to-day path to be **PicoClaw authoring its own
-> changes from chat** while you just review and merge. v2 was a setup guide
-> with a separate operating section; this guide merges the two and makes the
-> self-authoring loop — and the `/dev-cycle` skill — the center of gravity.
-> If you only need a status checklist for an already-running pipeline, see
-> `PIPELINE_USER_GUIDE.md` (v1).
+> changes from chat** while you just review and merge. This guide covers
+> everything in one place: what you're building, the architecture, the setup
+> walkthrough, and the day-to-day operating loop — with the `/dev-cycle`
+> skill as the engine that makes self-authoring work.
 
 ---
 
@@ -445,9 +444,9 @@ chmod u+rwx,go+rx ~/go/bin/gitleaks
 gitleaks version   # → 8.21.2
 ```
 
-Add `~/go/bin` to your PATH, then install the pre-commit hook (it's
-documented in `PIPELINE_PLAN.md` Step 7 — a small script that runs
-`gitleaks protect --staged` on every commit and blocks on findings).
+Add `~/go/bin` to your PATH, then install the pre-commit hook — a small
+script that runs `gitleaks protect --staged` on every commit and blocks on
+findings:
 
 > Honest scope: a local hook is convenience, not a security boundary — anyone
 > with shell access can `git commit --no-verify`. The *real* controls are
@@ -890,7 +889,7 @@ the agent-driven flow.
 | `.github/workflows/auto-pr.yml` | Auto-open PR as `github-actions[bot]` on `fix/**`/`feat/**`/`feature/**` push |
 | `scripts/setup-picoclaw.sh` | One-time Pi bootstrap |
 | `deploy-picoclaw.sh` | Watchdog script (lives in repo; copied to `/opt/picoclaw/`) |
-| `docs/pipeline-readme.MD` | This guide — complete setup + self-authoring reference |
+| `docs/PIPELINE-README.md` | This guide — complete setup + self-authoring reference |
 | `skills/dev-cycle/SKILL.md` | Agent dev-cycle knowledge — the engine of self-authoring |
 
 ### File inventory (Pi)
@@ -951,8 +950,6 @@ cat ~/.local/state/logrotate.status
 
 ---
 
-*Complete setup + self-authoring guide (v3). Written for a fresh setup with
-the chat-driven dev loop as the primary path. Maintained by PicoClaw 🦞 —
-2026-08-03. Replaces v2; the v1 day-to-day guide remains for status checks.
-Versioned in the repo at `docs/pipeline-readme.MD` (mirrors the workspace
-`PIPELINE_USER_GUIDE_v3.md`).*
+*Complete setup + self-authoring guide. Written for a fresh setup with the
+chat-driven dev loop as the primary path. Maintained by PicoClaw 🦞 —
+2026-08-03.*
