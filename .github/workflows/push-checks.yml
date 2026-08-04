@@ -1,0 +1,184 @@
+name: Push Checks
+
+# Push-triggered mirror of upstream pr.yml (Linter, Security Check, Tests,
+# Integration Tests).
+#
+# Why: auto-pr opens PRs as github-actions[bot], and GitHub gates
+# pull_request-triggered runs from bot authors in the public repo ("requires
+# approval from a maintainer"). Push events from trusted collaborators run
+# immediately (actor j-v) and their check runs still show on the PR, so test
+# and lint failures are caught on every push without waiting for a human to
+# approve the bot-authored PR runs.
+#
+# This workflow is additive on purpose: upstream's pr.yml is left untouched so
+# future upstream merges stay conflict-free. Same pattern as build-arm64.yml.
+#
+# Job names carry a "(push)" suffix so they never collide with pr.yml's
+# same-named jobs — that keeps them unambiguous if you add them as required
+# checks in branch protection later.
+#
+# No `paths:` filter on the trigger (required checks must always exist); the
+# in-job dorny/paths-filter skips the heavy steps on non-Go pushes.
+
+on:
+  push:
+    branches: ['**']   # no paths filter — required check must always exist
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Linter (push)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check Go-relevant paths
+        id: paths
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            go:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'web/frontend/**'
+              - 'web/backend/icon.*'
+              - 'workspace/**'
+              - 'Makefile'
+              - 'web/Makefile'
+              - '.github/workflows/**'
+            integration:
+              - 'scripts/**'
+
+      - name: Setup Go
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run go generate
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        run: go generate ./...
+
+      - name: Golangci Lint
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.10.1
+          args: --build-tags=goolm,stdjson
+
+  vuln_check:
+    name: Security Check (push)
+    runs-on: ubuntu-latest
+    env:
+      GOFLAGS: -tags=goolm,stdjson
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check Go-relevant paths
+        id: paths
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            go:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'web/frontend/**'
+              - 'web/backend/icon.*'
+              - 'workspace/**'
+              - 'Makefile'
+              - 'web/Makefile'
+              - '.github/workflows/**'
+            integration:
+              - 'scripts/**'
+
+      - name: Setup Go
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+
+      - name: Run Govulncheck
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        run: govulncheck -C . -format text ./...
+
+  test:
+    name: Tests (push)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check Go-relevant paths
+        id: paths
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            go:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'web/frontend/**'
+              - 'web/backend/icon.*'
+              - 'workspace/**'
+              - 'Makefile'
+              - 'web/Makefile'
+              - '.github/workflows/**'
+            integration:
+              - 'scripts/**'
+
+      - name: Setup Go
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run go generate
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        run: go generate ./...
+
+      - name: Run go test
+        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+        run: go test -tags goolm,stdjson ./...
+
+  integration:
+    name: Integration Tests (push)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check Go-relevant paths
+        id: paths
+        if: github.event_name != 'workflow_dispatch'
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            go:
+              - '**.go'
+              - 'go.mod'
+              - 'go.sum'
+              - 'web/frontend/**'
+              - 'web/backend/icon.*'
+              - 'workspace/**'
+              - 'Makefile'
+              - 'web/Makefile'
+              - '.github/workflows/**'
+            integration:
+              - 'scripts/**'
+
+      - name: Run Docker-backed integration suites
+        if: steps.paths.outputs.go == 'true' || steps.paths.outputs.integration == 'true' || github.event_name == 'workflow_dispatch'
+        run: bash ./scripts/run-integration-tests.sh
