@@ -413,3 +413,123 @@ func TestMaybeResolveThreadParent(t *testing.T) {
 		t.Fatalf("flag on DM: maybeResolveThreadParent = %q, want empty", got)
 	}
 }
+
+func TestThreadStartMessage(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		requests []string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/channels/parent-1/messages/thread-1":
+			w.Header().Set("Content-Type", "application/json")
+			const startJSON = `{"id":"thread-1","content":"hello from the start message",` +
+				`"author":{"username":"jonotron"}}`
+			_, _ = io.WriteString(w, startJSON)
+		case r.Method == http.MethodGet && r.URL.Path == "/channels/parent-2/messages/thread-2":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"thread-2","content":"","author":{"username":"nobody"}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"message":"404: Not Found"}`)
+		}
+	}))
+	defer server.Close()
+
+	origChannels := discordgo.EndpointChannels
+	discordgo.EndpointChannels = server.URL + "/channels/"
+	defer func() {
+		discordgo.EndpointChannels = origChannels
+	}()
+
+	session, err := discordgo.New("Bot test-token")
+	if err != nil {
+		t.Fatalf("discordgo.New() error: %v", err)
+	}
+	session.Client = server.Client()
+
+	// Register a state-cached channel so resolveDiscordRefs resolves <#id>
+	// without an extra REST call.
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:   "111222333",
+		Name: "general",
+	}); err != nil {
+		t.Fatalf("ChannelAdd() error: %v", err)
+	}
+
+	ch := &DiscordChannel{session: session}
+
+	// Success case: fetches the start message, resolves refs, formats it.
+	got := ch.threadStartMessage(session, "G001", "parent-1", "thread-1")
+	want := "[thread started from jonotron's message]: hello from the start message"
+	if got != want {
+		t.Fatalf("threadStartMessage() = %q, want %q", got, want)
+	}
+
+	// Empty content case: returns "".
+	if got := ch.threadStartMessage(session, "G001", "parent-2", "thread-2"); got != "" {
+		t.Fatalf("threadStartMessage(empty content) = %q, want empty", got)
+	}
+
+	// Error case (unknown parent/message -> 404): returns "".
+	if got := ch.threadStartMessage(session, "G001", "parent-3", "thread-3"); got != "" {
+		t.Fatalf("threadStartMessage(unknown) = %q, want empty", got)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, req := range requests {
+		if req == "GET /channels/parent-1/messages/thread-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected start-message fetch request, got %v", requests)
+	}
+}
+
+func TestThreadStartMessage_ResolvesChannelRefs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/channels/parent-1/messages/thread-1" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"thread-1","content":"see <#111222333>","author":{"username":"jonotron"}}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"message":"404: Not Found"}`)
+	}))
+	defer server.Close()
+
+	origChannels := discordgo.EndpointChannels
+	discordgo.EndpointChannels = server.URL + "/channels/"
+	defer func() {
+		discordgo.EndpointChannels = origChannels
+	}()
+
+	session, err := discordgo.New("Bot test-token")
+	if err != nil {
+		t.Fatalf("discordgo.New() error: %v", err)
+	}
+	session.Client = server.Client()
+
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:   "111222333",
+		Name: "general",
+	}); err != nil {
+		t.Fatalf("ChannelAdd() error: %v", err)
+	}
+
+	ch := &DiscordChannel{session: session}
+
+	got := ch.threadStartMessage(session, "G001", "parent-1", "thread-1")
+	want := "[thread started from jonotron's message]: see #general"
+	if got != want {
+		t.Fatalf("threadStartMessage() = %q, want %q", got, want)
+	}
+}

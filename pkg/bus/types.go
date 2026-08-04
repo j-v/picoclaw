@@ -27,6 +27,12 @@ type InboundContext struct {
 	// history. Adapters populate this only when the feature is enabled.
 	ParentChatID string `json:"parent_chat_id,omitempty"`
 
+	// ThreadStartMessage is the parent-channel message a sub-conversation was
+	// created from (e.g. the message a Discord thread started from), formatted
+	// for context injection. Adapters populate it when resolvable so a new
+	// thread session can seed its context from its origin.
+	ThreadStartMessage string `json:"thread_start_message,omitempty"`
+
 	SpaceID   string `json:"space_id,omitempty"`
 	SpaceType string `json:"space_type,omitempty"` // guild / team / workspace / tenant
 

@@ -10,6 +10,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/constants"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/providers"
 	"github.com/sipeed/picoclaw/pkg/routing"
 	"github.com/sipeed/picoclaw/pkg/session"
 	"github.com/sipeed/picoclaw/pkg/utils"
@@ -158,6 +159,11 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 	scopeKey := resolveScopeKey(allocation.SessionKey, msg.SessionKey)
 	sessionKey := scopeKey
 
+	// When a thread (sub-conversation) is first used, seed its session with
+	// the parent-channel message it was created from so the thread remembers
+	// its origin.
+	al.seedThreadSessionFromStartMessage(agent, sessionKey, msg.Context.ThreadStartMessage)
+
 	// Reset message-tool state for this round so we don't skip publishing due to a previous round.
 	if tool, ok := agent.Tools.Get("message"); ok {
 		if resetter, ok := tool.(interface{ ResetSentInRound(sessionKey string) }); ok {
@@ -239,6 +245,28 @@ func (al *AgentLoop) allocateRouteSession(route routing.ResolvedRoute, msg bus.I
 		Context:       normalizedInboundContext(msg),
 		SessionPolicy: route.SessionPolicy,
 	})
+}
+
+// seedThreadSessionFromStartMessage seeds a sub-conversation's (e.g. Discord
+// thread) session with the parent-channel message it was created from, the
+// first time a message arrives. It does not copy the parent session's history:
+// the thread starts fresh with only its origin message as context.
+func (al *AgentLoop) seedThreadSessionFromStartMessage(agent *AgentInstance, sessionKey, startMessage string) {
+	startMessage = strings.TrimSpace(startMessage)
+	if startMessage == "" || agent == nil || agent.Sessions == nil {
+		return
+	}
+	if len(agent.Sessions.GetHistory(sessionKey)) > 0 {
+		return // thread session already has history
+	}
+	agent.Sessions.AddFullMessage(sessionKey, providers.Message{
+		Role:    "user",
+		Content: startMessage,
+	})
+	logger.InfoCF("agent", "Seeded thread session from start message",
+		map[string]any{
+			"thread_session": sessionKey,
+		})
 }
 
 func (al *AgentLoop) processSystemMessage(
