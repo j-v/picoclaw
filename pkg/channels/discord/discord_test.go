@@ -33,6 +33,22 @@ func (*noopReader) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
+// newTestDiscordSession returns a discordgo session whose state cache has a
+// registered guild. The forked discordgo's State.ChannelAdd refuses channels
+// whose GuildID is not present in the guild cache, so tests that seed the
+// state cache must register a guild first and set GuildID on their channels.
+func newTestDiscordSession(t *testing.T) *discordgo.Session {
+	t.Helper()
+	session, err := discordgo.New("Bot test-token")
+	if err != nil {
+		t.Fatalf("discordgo.New() error: %v", err)
+	}
+	if err := session.State.GuildAdd(&discordgo.Guild{ID: "G001"}); err != nil {
+		t.Fatalf("GuildAdd() error: %v", err)
+	}
+	return session
+}
+
 func TestApplyDiscordProxy_CustomProxy(t *testing.T) {
 	session, err := discordgo.New("Bot test-token")
 	if err != nil {
@@ -337,14 +353,12 @@ func TestSend_NonToolFeedbackFinalizerStillStartsTTS(t *testing.T) {
 }
 
 func TestResolveThreadParentID_StateCache(t *testing.T) {
-	session, err := discordgo.New("Bot test-token")
-	if err != nil {
-		t.Fatalf("discordgo.New() error: %v", err)
-	}
+	session := newTestDiscordSession(t)
 
 	// Thread channel with a parent.
 	if err := session.State.ChannelAdd(&discordgo.Channel{
 		ID:       "111222333",
+		GuildID:  "G001",
 		Type:     discordgo.ChannelTypeGuildPublicThread,
 		ParentID: "999888777",
 	}); err != nil {
@@ -352,8 +366,9 @@ func TestResolveThreadParentID_StateCache(t *testing.T) {
 	}
 	// Regular (non-thread) channel.
 	if err := session.State.ChannelAdd(&discordgo.Channel{
-		ID:   "555666777",
-		Type: discordgo.ChannelTypeGuildText,
+		ID:      "555666777",
+		GuildID: "G001",
+		Type:    discordgo.ChannelTypeGuildText,
 	}); err != nil {
 		t.Fatalf("ChannelAdd(text) error: %v", err)
 	}
@@ -372,21 +387,20 @@ func TestResolveThreadParentID_StateCache(t *testing.T) {
 }
 
 func TestMaybeResolveThreadParent(t *testing.T) {
-	session, err := discordgo.New("Bot test-token")
-	if err != nil {
-		t.Fatalf("discordgo.New() error: %v", err)
-	}
+	session := newTestDiscordSession(t)
 
 	if err := session.State.ChannelAdd(&discordgo.Channel{
 		ID:       "111222333",
+		GuildID:  "G001",
 		Type:     discordgo.ChannelTypeGuildPublicThread,
 		ParentID: "999888777",
 	}); err != nil {
 		t.Fatalf("ChannelAdd(thread) error: %v", err)
 	}
 	if err := session.State.ChannelAdd(&discordgo.Channel{
-		ID:   "555666777",
-		Type: discordgo.ChannelTypeGuildText,
+		ID:      "555666777",
+		GuildID: "G001",
+		Type:    discordgo.ChannelTypeGuildText,
 	}); err != nil {
 		t.Fatalf("ChannelAdd(text) error: %v", err)
 	}
@@ -447,17 +461,15 @@ func TestThreadStartMessage(t *testing.T) {
 		discordgo.EndpointChannels = origChannels
 	}()
 
-	session, err := discordgo.New("Bot test-token")
-	if err != nil {
-		t.Fatalf("discordgo.New() error: %v", err)
-	}
+	session := newTestDiscordSession(t)
 	session.Client = server.Client()
 
 	// Register a state-cached channel so resolveDiscordRefs resolves <#id>
 	// without an extra REST call.
 	if err := session.State.ChannelAdd(&discordgo.Channel{
-		ID:   "111222333",
-		Name: "general",
+		ID:      "111222333",
+		GuildID: "G001",
+		Name:    "general",
 	}); err != nil {
 		t.Fatalf("ChannelAdd() error: %v", err)
 	}
@@ -512,15 +524,13 @@ func TestThreadStartMessage_ResolvesChannelRefs(t *testing.T) {
 		discordgo.EndpointChannels = origChannels
 	}()
 
-	session, err := discordgo.New("Bot test-token")
-	if err != nil {
-		t.Fatalf("discordgo.New() error: %v", err)
-	}
+	session := newTestDiscordSession(t)
 	session.Client = server.Client()
 
 	if err := session.State.ChannelAdd(&discordgo.Channel{
-		ID:   "111222333",
-		Name: "general",
+		ID:      "111222333",
+		GuildID: "G001",
+		Name:    "general",
 	}); err != nil {
 		t.Fatalf("ChannelAdd() error: %v", err)
 	}
