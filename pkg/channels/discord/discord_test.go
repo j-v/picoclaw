@@ -16,6 +16,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/audio/tts"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 type stubTTSProvider struct{}
@@ -332,5 +333,83 @@ func TestSend_NonToolFeedbackFinalizerStillStartsTTS(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected TTS to start for finalized tracked tool feedback reply")
+	}
+}
+
+func TestResolveThreadParentID_StateCache(t *testing.T) {
+	session, err := discordgo.New("Bot test-token")
+	if err != nil {
+		t.Fatalf("discordgo.New() error: %v", err)
+	}
+
+	// Thread channel with a parent.
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:       "111222333",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "999888777",
+	}); err != nil {
+		t.Fatalf("ChannelAdd(thread) error: %v", err)
+	}
+	// Regular (non-thread) channel.
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:   "555666777",
+		Type: discordgo.ChannelTypeGuildText,
+	}); err != nil {
+		t.Fatalf("ChannelAdd(text) error: %v", err)
+	}
+
+	ch := &DiscordChannel{session: session}
+
+	if got, want := ch.resolveThreadParentID(session, "111222333"), "999888777"; got != want {
+		t.Fatalf("resolveThreadParentID(thread) = %q, want %q", got, want)
+	}
+	if got := ch.resolveThreadParentID(session, "555666777"); got != "" {
+		t.Fatalf("resolveThreadParentID(text) = %q, want empty", got)
+	}
+	if got := ch.resolveThreadParentID(session, "000000000"); got != "" {
+		t.Fatalf("resolveThreadParentID(unknown) = %q, want empty", got)
+	}
+}
+
+func TestMaybeResolveThreadParent(t *testing.T) {
+	session, err := discordgo.New("Bot test-token")
+	if err != nil {
+		t.Fatalf("discordgo.New() error: %v", err)
+	}
+
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:       "111222333",
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+		ParentID: "999888777",
+	}); err != nil {
+		t.Fatalf("ChannelAdd(thread) error: %v", err)
+	}
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:   "555666777",
+		Type: discordgo.ChannelTypeGuildText,
+	}); err != nil {
+		t.Fatalf("ChannelAdd(text) error: %v", err)
+	}
+
+	// Flag off: never resolves, even for thread messages.
+	ch := &DiscordChannel{session: session, config: &config.DiscordSettings{}}
+	if got := ch.maybeResolveThreadParent(session, "G001", "111222333"); got != "" {
+		t.Fatalf("flag off: maybeResolveThreadParent = %q, want empty", got)
+	}
+
+	// Flag on, guild message in a thread -> parent channel ID.
+	ch.config.ThreadParentRouting = true
+	if got, want := ch.maybeResolveThreadParent(session, "G001", "111222333"), "999888777"; got != want {
+		t.Fatalf("flag on thread: maybeResolveThreadParent = %q, want %q", got, want)
+	}
+
+	// Flag on, non-thread channel -> empty.
+	if got := ch.maybeResolveThreadParent(session, "G001", "555666777"); got != "" {
+		t.Fatalf("flag on text channel: maybeResolveThreadParent = %q, want empty", got)
+	}
+
+	// Flag on, DM (no guild) -> empty, even for a thread ID.
+	if got := ch.maybeResolveThreadParent(session, "", "111222333"); got != "" {
+		t.Fatalf("flag on DM: maybeResolveThreadParent = %q, want empty", got)
 	}
 }

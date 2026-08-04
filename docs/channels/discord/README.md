@@ -29,6 +29,7 @@ Discord is a free voice, video, and text chat application designed for communiti
       "group_trigger": {
         "mention_only": false
       },
+      "thread_parent_routing": false,
       "reasoning_channel_id": ""
     }
   }
@@ -42,6 +43,7 @@ Discord is a free voice, video, and text chat application designed for communiti
 | allow_from           | array  | No       | Allowlist of user IDs; empty means all users are allowed                    |
 | placeholder          | object | No       | Placeholder message config shown while the agent is working                 |
 | group_trigger        | object | No       | Group trigger settings (example: { "mention_only": false })                 |
+| thread_parent_routing| bool   | No       | Dispatch thread messages using the thread's parent channel for rule matching (default false). |
 | reasoning_channel_id | string | No       | Optional target channel ID for reasoning/thinking output                    |
 
 ## Visible Execution Feedback

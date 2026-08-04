@@ -20,6 +20,13 @@ type InboundContext struct {
 	ChatType string `json:"chat_type,omitempty"` // direct / group / channel
 	TopicID  string `json:"topic_id,omitempty"`
 
+	// ParentChatID is the parent channel for a sub-conversation (e.g. a
+	// Discord thread). When set, dispatch matching uses it in place of
+	// ChatID so rules written for the parent channel match thread messages.
+	// Session allocation still keys on ChatID, so threads keep independent
+	// history. Adapters populate this only when the feature is enabled.
+	ParentChatID string `json:"parent_chat_id,omitempty"`
+
 	SpaceID   string `json:"space_id,omitempty"`
 	SpaceType string `json:"space_type,omitempty"` // guild / team / workspace / tenant
 

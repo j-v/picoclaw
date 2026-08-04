@@ -681,7 +681,49 @@ func (c *DiscordChannel) handleMessage(s *discordgo.Session, m *discordgo.Messag
 		inboundCtx.ReplyToMessageID = m.MessageReference.MessageID
 	}
 
+	// Thread parent routing: when enabled, dispatch thread messages using the
+	// parent channel's ID so dispatch rules written for the channel match.
+	// Session allocation still uses m.ChannelID (thread), so each thread keeps
+	// its own history with the routed agent.
+	if parentID := c.maybeResolveThreadParent(c.session, m.GuildID, m.ChannelID); parentID != "" {
+		inboundCtx.ParentChatID = parentID
+		logger.DebugCF("discord", "Thread parent routing", map[string]any{
+			"thread_id": m.ChannelID,
+			"parent_id": parentID,
+		})
+	}
+
 	c.HandleInboundContext(c.ctx, m.ChannelID, content, mediaPaths, inboundCtx, sender)
+}
+
+// maybeResolveThreadParent returns the parent channel ID when thread parent
+// routing is enabled, the message comes from a guild, and channelID is a
+// thread. It returns "" when the flag is off or the channel is not a thread.
+func (c *DiscordChannel) maybeResolveThreadParent(s *discordgo.Session, guildID, channelID string) string {
+	if c.config == nil || !c.config.ThreadParentRouting || guildID == "" {
+		return ""
+	}
+	return c.resolveThreadParentID(s, channelID)
+}
+
+// resolveThreadParentID returns the parent channel ID when channelID is a
+// thread, otherwise "". It prefers the session state cache and falls back to a
+// REST lookup, mirroring resolveDiscordRefs.
+func (c *DiscordChannel) resolveThreadParentID(s *discordgo.Session, channelID string) string {
+	if ch, err := s.State.Channel(channelID); err == nil {
+		if ch.IsThread() {
+			return ch.ParentID
+		}
+		return ""
+	}
+	ch, err := s.Channel(channelID)
+	if err != nil {
+		return ""
+	}
+	if ch.IsThread() {
+		return ch.ParentID
+	}
+	return ""
 }
 
 // startTyping starts a continuous typing indicator loop for the given chatID.
