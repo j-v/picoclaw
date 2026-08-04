@@ -687,6 +687,13 @@ func (c *DiscordChannel) handleMessage(s *discordgo.Session, m *discordgo.Messag
 	// its own history with the routed agent.
 	if parentID := c.maybeResolveThreadParent(c.session, m.GuildID, m.ChannelID); parentID != "" {
 		inboundCtx.ParentChatID = parentID
+		// The thread's start message is the parent-channel message it was
+		// created from. For message threads its ID equals the thread channel
+		// ID, so it can be fetched directly from the parent channel. The agent
+		// uses this to seed a new thread's session with its origin message.
+		if start := c.threadStartMessage(c.session, m.GuildID, parentID, m.ChannelID); start != "" {
+			inboundCtx.ThreadStartMessage = start
+		}
 		logger.DebugCF("discord", "Thread parent routing", map[string]any{
 			"thread_id": m.ChannelID,
 			"parent_id": parentID,
@@ -724,6 +731,24 @@ func (c *DiscordChannel) resolveThreadParentID(s *discordgo.Session, channelID s
 		return ch.ParentID
 	}
 	return ""
+}
+
+// threadStartMessage returns a formatted rendering of the parent-channel
+// message a thread was created from, or "" when unavailable. For message
+// threads the start message ID equals the thread channel ID, so it can be
+// fetched directly from the parent channel. It mirrors the quoted-message
+// formatting used elsewhere in handleMessage.
+func (c *DiscordChannel) threadStartMessage(s *discordgo.Session, guildID, parentID, threadID string) string {
+	msg, err := s.ChannelMessage(parentID, threadID)
+	if err != nil || msg == nil || strings.TrimSpace(msg.Content) == "" {
+		return ""
+	}
+	author := "unknown"
+	if msg.Author != nil && strings.TrimSpace(msg.Author.Username) != "" {
+		author = msg.Author.Username
+	}
+	content := c.resolveDiscordRefs(s, msg.Content, guildID)
+	return fmt.Sprintf("[thread started from %s's message]: %s", author, content)
 }
 
 // startTyping starts a continuous typing indicator loop for the given chatID.

@@ -33,6 +33,22 @@ func (*noopReader) Read(p []byte) (int, error) {
 	return 0, io.EOF
 }
 
+// newTestDiscordSession returns a discordgo session whose state cache has a
+// registered guild. The forked discordgo's State.ChannelAdd refuses channels
+// whose GuildID is not present in the guild cache, so tests that seed the
+// state cache must register a guild first and set GuildID on their channels.
+func newTestDiscordSession(t *testing.T) *discordgo.Session {
+	t.Helper()
+	session, err := discordgo.New("Bot test-token")
+	if err != nil {
+		t.Fatalf("discordgo.New() error: %v", err)
+	}
+	if err := session.State.GuildAdd(&discordgo.Guild{ID: "G001"}); err != nil {
+		t.Fatalf("GuildAdd() error: %v", err)
+	}
+	return session
+}
+
 func TestApplyDiscordProxy_CustomProxy(t *testing.T) {
 	session, err := discordgo.New("Bot test-token")
 	if err != nil {
@@ -337,14 +353,12 @@ func TestSend_NonToolFeedbackFinalizerStillStartsTTS(t *testing.T) {
 }
 
 func TestResolveThreadParentID_StateCache(t *testing.T) {
-	session, err := discordgo.New("Bot test-token")
-	if err != nil {
-		t.Fatalf("discordgo.New() error: %v", err)
-	}
+	session := newTestDiscordSession(t)
 
 	// Thread channel with a parent.
 	if err := session.State.ChannelAdd(&discordgo.Channel{
 		ID:       "111222333",
+		GuildID:  "G001",
 		Type:     discordgo.ChannelTypeGuildPublicThread,
 		ParentID: "999888777",
 	}); err != nil {
@@ -352,8 +366,9 @@ func TestResolveThreadParentID_StateCache(t *testing.T) {
 	}
 	// Regular (non-thread) channel.
 	if err := session.State.ChannelAdd(&discordgo.Channel{
-		ID:   "555666777",
-		Type: discordgo.ChannelTypeGuildText,
+		ID:      "555666777",
+		GuildID: "G001",
+		Type:    discordgo.ChannelTypeGuildText,
 	}); err != nil {
 		t.Fatalf("ChannelAdd(text) error: %v", err)
 	}
@@ -372,21 +387,20 @@ func TestResolveThreadParentID_StateCache(t *testing.T) {
 }
 
 func TestMaybeResolveThreadParent(t *testing.T) {
-	session, err := discordgo.New("Bot test-token")
-	if err != nil {
-		t.Fatalf("discordgo.New() error: %v", err)
-	}
+	session := newTestDiscordSession(t)
 
 	if err := session.State.ChannelAdd(&discordgo.Channel{
 		ID:       "111222333",
+		GuildID:  "G001",
 		Type:     discordgo.ChannelTypeGuildPublicThread,
 		ParentID: "999888777",
 	}); err != nil {
 		t.Fatalf("ChannelAdd(thread) error: %v", err)
 	}
 	if err := session.State.ChannelAdd(&discordgo.Channel{
-		ID:   "555666777",
-		Type: discordgo.ChannelTypeGuildText,
+		ID:      "555666777",
+		GuildID: "G001",
+		Type:    discordgo.ChannelTypeGuildText,
 	}); err != nil {
 		t.Fatalf("ChannelAdd(text) error: %v", err)
 	}
@@ -411,5 +425,121 @@ func TestMaybeResolveThreadParent(t *testing.T) {
 	// Flag on, DM (no guild) -> empty, even for a thread ID.
 	if got := ch.maybeResolveThreadParent(session, "", "111222333"); got != "" {
 		t.Fatalf("flag on DM: maybeResolveThreadParent = %q, want empty", got)
+	}
+}
+
+func TestThreadStartMessage(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		requests []string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/channels/parent-1/messages/thread-1":
+			w.Header().Set("Content-Type", "application/json")
+			const startJSON = `{"id":"thread-1","content":"hello from the start message",` +
+				`"author":{"username":"alice"}}`
+			_, _ = io.WriteString(w, startJSON)
+		case r.Method == http.MethodGet && r.URL.Path == "/channels/parent-2/messages/thread-2":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"thread-2","content":"","author":{"username":"nobody"}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"message":"404: Not Found"}`)
+		}
+	}))
+	defer server.Close()
+
+	origChannels := discordgo.EndpointChannels
+	discordgo.EndpointChannels = server.URL + "/channels/"
+	defer func() {
+		discordgo.EndpointChannels = origChannels
+	}()
+
+	session := newTestDiscordSession(t)
+	session.Client = server.Client()
+
+	// Register a state-cached channel so resolveDiscordRefs resolves <#id>
+	// without an extra REST call.
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:      "111222333",
+		GuildID: "G001",
+		Name:    "general",
+	}); err != nil {
+		t.Fatalf("ChannelAdd() error: %v", err)
+	}
+
+	ch := &DiscordChannel{session: session}
+
+	// Success case: fetches the start message, resolves refs, formats it.
+	got := ch.threadStartMessage(session, "G001", "parent-1", "thread-1")
+	want := "[thread started from alice's message]: hello from the start message"
+	if got != want {
+		t.Fatalf("threadStartMessage() = %q, want %q", got, want)
+	}
+
+	// Empty content case: returns "".
+	if got := ch.threadStartMessage(session, "G001", "parent-2", "thread-2"); got != "" {
+		t.Fatalf("threadStartMessage(empty content) = %q, want empty", got)
+	}
+
+	// Error case (unknown parent/message -> 404): returns "".
+	if got := ch.threadStartMessage(session, "G001", "parent-3", "thread-3"); got != "" {
+		t.Fatalf("threadStartMessage(unknown) = %q, want empty", got)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, req := range requests {
+		if req == "GET /channels/parent-1/messages/thread-1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected start-message fetch request, got %v", requests)
+	}
+}
+
+func TestThreadStartMessage_ResolvesChannelRefs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/channels/parent-1/messages/thread-1" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":"thread-1","content":"see <#111222333>","author":{"username":"alice"}}`)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"message":"404: Not Found"}`)
+	}))
+	defer server.Close()
+
+	origChannels := discordgo.EndpointChannels
+	discordgo.EndpointChannels = server.URL + "/channels/"
+	defer func() {
+		discordgo.EndpointChannels = origChannels
+	}()
+
+	session := newTestDiscordSession(t)
+	session.Client = server.Client()
+
+	if err := session.State.ChannelAdd(&discordgo.Channel{
+		ID:      "111222333",
+		GuildID: "G001",
+		Name:    "general",
+	}); err != nil {
+		t.Fatalf("ChannelAdd() error: %v", err)
+	}
+
+	ch := &DiscordChannel{session: session}
+
+	got := ch.threadStartMessage(session, "G001", "parent-1", "thread-1")
+	want := "[thread started from alice's message]: see #general"
+	if got != want {
+		t.Fatalf("threadStartMessage() = %q, want %q", got, want)
 	}
 }
