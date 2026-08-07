@@ -107,10 +107,16 @@ func (sl *SkillsLoader) ListSkills() []SkillInfo {
 			return
 		}
 		for _, d := range dirs {
-			if !d.IsDir() {
+			// Follow symlinks: a skills directory may be a symlink to a
+			// versioned location (e.g. a git checkout). os.ReadDir's
+			// DirEntry.IsDir() does not follow symlinks, so resolve with
+			// os.Stat (which does) before deciding whether to skip.
+			skillDir := filepath.Join(dir, d.Name())
+			st, err := os.Stat(skillDir)
+			if err != nil || !st.IsDir() {
 				continue
 			}
-			skillFile := filepath.Join(dir, d.Name(), "SKILL.md")
+			skillFile := filepath.Join(skillDir, "SKILL.md")
 			if _, err := os.Stat(skillFile); err != nil {
 				continue
 			}

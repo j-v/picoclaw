@@ -266,6 +266,36 @@ func TestListSkillsDirWithoutSkillMD(t *testing.T) {
 	assert.Equal(t, "real-skill", skills[0].Name)
 }
 
+func TestListSkillsFollowsSymlinkedSkillDir(t *testing.T) {
+	tmp := t.TempDir()
+	ws := filepath.Join(tmp, "workspace")
+	skillsDir := filepath.Join(ws, "skills")
+	require.NoError(t, os.MkdirAll(skillsDir, 0o755))
+
+	// Real skill dir living outside the workspace skills root (e.g. a git checkout)
+	external := filepath.Join(tmp, "external")
+	createSkillDir(t, external, "linked-skill", "linked-skill", "desc via symlink")
+
+	// Symlink it into the workspace skills dir
+	require.NoError(t, os.Symlink(
+		filepath.Join(external, "linked-skill"),
+		filepath.Join(skillsDir, "linked-skill"),
+	))
+
+	// A broken symlink must be skipped, not crash the loader
+	require.NoError(t, os.Symlink(
+		filepath.Join(tmp, "does-not-exist"),
+		filepath.Join(skillsDir, "broken-skill"),
+	))
+
+	sl := NewSkillsLoader(ws, "", "")
+	skills := sl.ListSkills()
+
+	require.Len(t, skills, 1)
+	assert.Equal(t, "linked-skill", skills[0].Name)
+	assert.Equal(t, "desc via symlink", skills[0].Description)
+}
+
 func TestStripFrontmatter(t *testing.T) {
 	sl := &SkillsLoader{}
 
