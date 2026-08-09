@@ -63,9 +63,10 @@ linters:
     - usetesting
   settings:
     gomoddirectives:
+      # Vendored discordgo fork lives in third_party/ and is wired in via a
+      # local replace directive.
+      replace-local: true
       replace-allow-list:
-        - github.com/bwmarrin/discordgo
-      local-replace-allow-list:
         - github.com/bwmarrin/discordgo
     errcheck:
       check-type-assertions: true
