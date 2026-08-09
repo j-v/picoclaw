@@ -79,6 +79,11 @@ func NewDiscordChannel(
 		return nil, fmt.Errorf("failed to create discord session: %w", err)
 	}
 
+	// Log reconnect progress (trying/succeeded/failed) at INFO level so a
+	// mid-run gateway drop and the auto-reconnect are visible in gateway.log
+	// instead of failing silently. LogDebug would also log every heartbeat.
+	session.LogLevel = discordgo.LogInformational
+
 	if err := applyDiscordProxy(session, cfg.Proxy); err != nil {
 		return nil, err
 	}
