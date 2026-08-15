@@ -487,7 +487,7 @@ while true; do
     last_deployed=""
     [ -f "$STATE_FILE" ] && last_deployed=$(cat "$STATE_FILE")
 
-    # AFTER: only deploy runs NEWER than what's live (run IDs are monotonic).
+    # Only deploy runs NEWER than what's live (run IDs are monotonic).
     # Empty state (fresh install, first deploy) still deploys — bootstrap path.
     if { [ -z "$last_deployed" ] || [ "$success_id" -gt "$last_deployed" ] 2>/dev/null; } && ! is_failed "$success_id" && ! is_skipped "$success_id"; then
       deploy "$success_id" "$success_sha"
