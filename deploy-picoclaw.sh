@@ -435,9 +435,11 @@ tight_poll() {
     fi
 
     # Also check: did a different run complete while we were watching?
+    # Only redirect to a run NEWER than the one being tracked (run IDs are monotonic) —
+    # guards against GitHub returning a stale run as [0] (eventual-consistency quirk).
     local latest_success
     latest_success=$(gh run list --repo "$REPO" --workflow "$WORKFLOW" --branch main --status success --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null)
-    if [ -n "$latest_success" ] && [ "$latest_success" != "$run_id" ] && ! is_failed "$latest_success" && ! is_skipped "$latest_success"; then
+    if [ -n "$latest_success" ] && [ "$latest_success" -gt "$run_id" ] 2>/dev/null && ! is_failed "$latest_success" && ! is_skipped "$latest_success"; then
       if [ ! -f "$STATE_FILE" ] || [ "$(cat "$STATE_FILE")" != "$latest_success" ]; then
         log "⚠️  New successful run #$latest_success appeared while tracking #$run_id — deploying"
         deploy "$latest_success" ""
@@ -485,7 +487,9 @@ while true; do
     last_deployed=""
     [ -f "$STATE_FILE" ] && last_deployed=$(cat "$STATE_FILE")
 
-    if [ "$last_deployed" != "$success_id" ] && ! is_failed "$success_id" && ! is_skipped "$success_id"; then
+    # AFTER: only deploy runs NEWER than what's live (run IDs are monotonic).
+    # Empty state (fresh install, first deploy) still deploys — bootstrap path.
+    if { [ -z "$last_deployed" ] || [ "$success_id" -gt "$last_deployed" ] 2>/dev/null; } && ! is_failed "$success_id" && ! is_skipped "$success_id"; then
       deploy "$success_id" "$success_sha"
       continue  # re-check immediately after deploy
     fi
