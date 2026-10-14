@@ -477,12 +477,7 @@ func (p *Provider) Chat(
 
 	requestBody := p.buildRequestBody(messages, tools, model, options)
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		"POST",
-		p.apiBase+"/chat/completions",
-		common.NewStreamingJSONReader(requestBody),
-	)
+	req, err := common.NewJSONRequest(ctx, "POST", p.apiBase+"/chat/completions", requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -548,12 +543,7 @@ func (p *Provider) ChatStreamEvents(
 	requestBody := p.buildRequestBody(messages, tools, model, options)
 	requestBody["stream"] = true
 
-	req, err := http.NewRequestWithContext(
-		ctx,
-		"POST",
-		p.apiBase+"/chat/completions",
-		common.NewStreamingJSONReader(requestBody),
-	)
+	req, err := common.NewJSONRequest(ctx, "POST", p.apiBase+"/chat/completions", requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
