@@ -17,6 +17,7 @@
 4. [Setup walkthrough](#4-setup-walkthrough)
 5. [The self-authoring loop (operating day to day)](#5-the-self-authoring-loop-operating-day-to-day)
 6. [Troubleshooting common situations](#6-troubleshooting-common-situations)
+   - [6.3 Rotating the GitHub token](#63-rotating-the-github-token-every-90-days-or-immediately-if-leaked)
 7. [Security model](#7-security-model)
 8. [Optional hardening](#8-optional-hardening)
 9. [Reference](#9-reference)
@@ -815,6 +816,151 @@ the pipeline depends on `journalctl --user`.
 
 ---
 
+### 6.3 Rotating the GitHub token (every ~90 days, or immediately if leaked)
+
+Fine-grained PATs expire — 90 days is the recommended setting, so this comes
+around roughly four times a year. The token lives in **one place**: `gh`'s
+credential store at `~/.config/gh/hosts.yml` (mode `0600`). The watchdog reads
+it from there for every API call; nothing else on the Pi holds a copy.
+
+**It is not the deploy key.** Git pushes go over SSH via `~/.ssh/picoclaw-deploy`
+(`Host github-picoclaw`). Rotating the PAT does **not** affect pushing
+branches — only `gh` API calls (watchdog polling, `gh run download`,
+`gh pr create`… which the agent never does anyway).
+
+#### Before you start: does it actually need rotating?
+
+```bash
+gh auth status
+```
+
+- `✓ Logged in to github.com account j-v` → fine, nothing to do.
+- `X The token in /home/jonotron/.config/gh/hosts.yml is invalid.` → start at
+  step 2.
+- If it expires quietly, the first symptom is the **watchdog crash-looping**
+  (see the diagnosis box below), so check here first.
+
+#### Step 1 — Create the token on GitHub
+
+GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate
+new token.
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| Repository access | Only select repositories → `j-v/picoclaw` | Least privilege; add other repos only if onboarding them |
+| **Actions** | **Read-only** | The watchdog polls runs and downloads build artifacts. **Forgetting this is the #1 mistake** — setup logs a warning but still works, then deploys silently stop |
+| **Contents** | **Read and write** | Branch/ref metadata; artifact download |
+| **Pull requests** | **Leave UNSET** | The auto-pr workflow opens PRs as `github-actions[bot]`. A PAT with PR write would let the agent create/approve/merge its own work — this omission is what keeps the human merge gate real |
+| Metadata | Read (auto-added) | Mandatory |
+| Expiration | 90 days (or shorter) | Forces the rotation this runbook describes |
+
+**Common mistakes, in order of how often they bite:** forgetting Actions
+read (polls fail with 403), and granting Pull requests write (breaks the
+human merge gate). If in doubt, grant less — a missing permission produces a
+clear 403, while an over-granted one is silent.
+
+#### Step 2 — Import it on the Pi (nothing touching disk or shell history)
+
+Run this **on the Pi, in an interactive SSH session**:
+
+```bash
+read -r -s T && printf '%s\n' "$T" | gh auth login --hostname github.com --git-protocol https --with-token && unset T
+```
+
+It waits silently — paste the token, press Enter. The paste is hidden, so the
+token never appears in `~/.bash_history` and never lands in a file outside
+gh's own store.
+
+> **Never paste the token into the agent chat.** Discord/Telegram history is
+> not a secret store, and chat text is part of the model's context. If you
+> must hand it to the agent, write it to `~/.picoclaw/gh-token.txt`, say so,
+> and let it import + shred the file:
+> ```bash
+> gh auth login --hostname github.com --git-protocol https --with-token < ~/.picoclaw/gh-token.txt && shred -u ~/.picoclaw/gh-token.txt
+> ```
+
+#### Step 3 — Verify the token can do the watchdog's job
+
+```bash
+gh auth status
+gh api "repos/j-v/picoclaw/actions/runs?per_page=1" --jq '.workflow_runs[0] | "\(.id) \(.conclusion)"'
+```
+
+The second command exercises exactly what the watchdog needs (Actions: read).
+If it returns `403` or `Resource not accessible`, the token is missing
+**Actions: Read** — go back to step 1.
+
+#### Step 4 — Restart the watchdog and clear the failure state
+
+`gh` re-reads `hosts.yml` per invocation, so a healthy watchdog picks up the
+new token on its next poll. But if the old token **expired**, the watchdog has
+already been failing and systemd has it in a failed/rate-limited state:
+
+```bash
+systemctl --user reset-failed picoclaw-deploy
+systemctl --user restart picoclaw-deploy
+systemctl --user status picoclaw-deploy --no-pager | head -8
+```
+
+Confirm it settles into a normal poll loop:
+
+```bash
+journalctl _SYSTEMD_USER_UNIT=picoclaw-deploy.service -n 20 --no-pager | grep -i "auth\|Repo:\|poll"
+```
+
+You want the startup banner and **no** repeating `Failed to log in` lines; the
+service should show `active` with `NRestarts=0`.
+
+#### Step 5 — Revoke the old token
+
+GitHub → Settings → Developer settings → Fine-grained tokens → the old token →
+**Delete**. Do this *after* step 4 verifies, so you can tell which credential
+failed if something breaks.
+
+#### Diagnosis: the watchdog is crash-looping
+
+Symptom in `systemctl --user status picoclaw-deploy`: `activating
+(auto-restart)`, a climbing restart count, and journal lines reading `The token
+in /home/jonotron/.config/gh/hosts.yml is invalid`. That's an expired or
+revoked PAT — go to step 1.
+
+Stop the noise first; it hammers the GitHub API every `RestartSec`:
+
+```bash
+systemctl --user stop picoclaw-deploy
+```
+
+Two gotchas, both learned the hard way:
+
+- **Restart counts can reach the thousands**, not 5. `StartLimitIntervalSec` /
+  `StartLimitBurst` belong in `[Unit]`; under `[Service]` systemd (>= 229)
+  silently ignores them and logs `Unknown key … ignoring`, so the default
+  5-restarts-per-10s limit applies instead of 5-per-10-minutes. Verify with:
+  ```bash
+  systemd-analyze verify ~/.config/systemd/user/picoclaw-deploy.service   # silent = good
+  systemctl --user show picoclaw-deploy.service -p StartLimitIntervalUSec  # want 10min
+  ```
+  (Fixed in `scripts/setup-picoclaw.sh` and the live unit — if you ever
+  re-generate a unit file and see a huge restart count, check this first.)
+- **The launcher and gateway keep running normally** during a token outage.
+  Only auto-deploy is down. Don't mistake it for a gateway problem.
+
+#### Scope checklist (copy/paste into the GitHub token form)
+
+```
+Repository access: Only select repositories → j-v/picoclaw
+Permissions:
+  Actions ............. Read-only
+  Contents ............ Read and write
+  Metadata ............ Read (mandatory, auto-added)
+  Pull requests ....... UNSET  ← never grant
+  Administration ...... none
+  Workflows ........... none
+Expiration: 90 days
+```
+
+---
+
 ## 7. Security model
 
 Because the repo is **public** (the price of enforced branch protection on
@@ -929,6 +1075,12 @@ tail -f ~/.picoclaw/logs/launcher.log
 systemctl --user restart picoclaw-launcher     # respawns gateway too
 systemctl --user restart picoclaw-deploy       # watchdog only, safe
 systemctl --user kill -s USR1 picoclaw-deploy  # force an immediate poll
+
+# GitHub token (rotate every ~90 days — see §6.3)
+gh auth status                                 # is the token still valid?
+read -r -s T && printf '%s\n' "$T" | gh auth login --hostname github.com --git-protocol https --with-token && unset T
+gh api "repos/j-v/picoclaw/actions/runs?per_page=1" --jq '.workflow_runs[0].id'   # verify Actions: read
+systemctl --user reset-failed picoclaw-deploy && systemctl --user restart picoclaw-deploy
 
 # Rollback (no sudo)
 ln -sfn /opt/picoclaw/releases/<TS> /opt/picoclaw/current

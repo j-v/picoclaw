@@ -185,16 +185,19 @@ Documentation=https://github.com/j-v/picoclaw
 After=network-online.target
 Wants=network-online.target
 
+# Rate-limit: 5 crashes in 10 minutes → give up and stop
+# (prevents infinite crash-loop hammering the GitHub API while debugging).
+# NOTE: these are [Unit] keys. Placing them under [Service] is silently
+# ignored (systemd >= 229), which leaves the 5-restarts/10s default in
+# effect and an invalid token turns into a 1000+ restart crash loop.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
 [Service]
 Type=simple
 ExecStart=/opt/picoclaw/deploy-picoclaw.sh
 Restart=on-failure
 RestartSec=10
-
-# Rate-limit: 5 crashes in 10 minutes → give up and stop
-# (prevents infinite crash-loop hammering the GitHub API while debugging)
-StartLimitIntervalSec=600
-StartLimitBurst=5
 
 [Install]
 WantedBy=default.target
