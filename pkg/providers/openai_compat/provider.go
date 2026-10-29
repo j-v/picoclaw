@@ -2,7 +2,6 @@ package openai_compat
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,6 +41,7 @@ type Provider struct {
 	extraBody      map[string]any // Additional fields to inject into request body
 	customHeaders  map[string]string
 	userAgent      string
+	session        common.SessionHeader
 }
 
 type Option func(*Provider)
@@ -323,17 +323,24 @@ func normalizedHostname(rawURL string) string {
 	return strings.ToLower(strings.TrimSpace(parsed.Hostname()))
 }
 
-func (p *Provider) applyCustomHeaders(req *http.Request) {
+func (p *Provider) applyCustomHeaders(req *http.Request, options map[string]any) {
 	for k, v := range p.customHeaders {
 		if strings.TrimSpace(k) == "" {
 			continue
 		}
 		req.Header.Set(k, v)
 	}
+	p.session.Apply(req.Header, options)
 }
 
 func (p *Provider) SetProviderName(providerName string) {
 	p.providerName = strings.ToLower(strings.TrimSpace(providerName))
+}
+
+// SetSessionHeader makes every request carry options["session_key"] (or
+// fallback when absent) in the named header; an explicit custom header wins.
+func (p *Provider) SetSessionHeader(name, fallback string) {
+	p.session = common.SessionHeader{Name: strings.TrimSpace(name), Fallback: fallback}
 }
 
 func (p *Provider) SupportsThinking() bool {
@@ -470,12 +477,7 @@ func (p *Provider) Chat(
 
 	requestBody := p.buildRequestBody(messages, tools, model, options)
 
-	jsonData, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+"/chat/completions", bytes.NewReader(jsonData))
+	req, err := common.NewJSONRequest(ctx, "POST", p.apiBase+"/chat/completions", requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -487,7 +489,7 @@ func (p *Provider) Chat(
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
-	p.applyCustomHeaders(req)
+	p.applyCustomHeaders(req, options)
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -541,12 +543,7 @@ func (p *Provider) ChatStreamEvents(
 	requestBody := p.buildRequestBody(messages, tools, model, options)
 	requestBody["stream"] = true
 
-	jsonData, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+"/chat/completions", bytes.NewReader(jsonData))
+	req, err := common.NewJSONRequest(ctx, "POST", p.apiBase+"/chat/completions", requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -559,7 +556,7 @@ func (p *Provider) ChatStreamEvents(
 	if p.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	}
-	p.applyCustomHeaders(req)
+	p.applyCustomHeaders(req, options)
 
 	// Use a client without Timeout for streaming — the http.Client.Timeout covers
 	// the entire request lifecycle including body reads, which would kill long streams.
