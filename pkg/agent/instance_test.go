@@ -178,6 +178,42 @@ func TestNewAgentInstance_ResolveCandidatesFromModelListAlias(t *testing.T) {
 	}
 }
 
+func TestNewAgentInstance_ResolvesAliasWhenModelIDIsSharedAcrossProviders(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace: tmpDir,
+				ModelName: "go-deepseek-4.1-flash",
+			},
+		},
+		ModelList: []*config.ModelConfig{
+			{
+				ModelName: "opencode-go-deepseek-v4-flash",
+				Provider:  "openai",
+				Model:     "deepseek-v4.1-flash",
+				APIBase:   "https://opencode.ai/zen/go/v1",
+			},
+			{
+				ModelName: "go-deepseek-4.1-flash",
+				Provider:  "opencode-go",
+				Model:     "deepseek-v4.1-flash",
+				APIBase:   "https://opencode.ai/inference/go",
+			},
+		},
+	}
+
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, &mockProvider{})
+
+	if len(agent.Candidates) != 1 {
+		t.Fatalf("len(Candidates) = %d, want 1", len(agent.Candidates))
+	}
+	if got := agent.Candidates[0].Provider; got != "opencode-go" {
+		t.Fatalf("candidate provider = %q, want %q", got, "opencode-go")
+	}
+}
+
 func TestNewAgentInstance_PreservesDistinctLimiterIdentityForSharedResolvedModel(t *testing.T) {
 	tmpDir := t.TempDir()
 
