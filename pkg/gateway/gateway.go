@@ -191,13 +191,9 @@ func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) (runEr
 		}
 	}()
 
-	provider, modelID, err := createStartupProvider(cfg, allowEmptyStartup)
+	provider, err := createStartupProvider(cfg, allowEmptyStartup)
 	if err != nil {
 		return fmt.Errorf("error creating provider: %w", err)
-	}
-
-	if modelID != "" {
-		cfg.Agents.Defaults.ModelName = modelID
 	}
 
 	msgBus := bus.NewMessageBus()
@@ -385,7 +381,7 @@ func executeReload(
 func createStartupProvider(
 	cfg *config.Config,
 	allowEmptyStartup bool,
-) (providers.LLMProvider, string, error) {
+) (providers.LLMProvider, error) {
 	modelName := cfg.Agents.Defaults.GetModelName()
 	if modelName == "" && allowEmptyStartup {
 		reason := "no default model configured; gateway started in limited mode"
@@ -393,14 +389,14 @@ func createStartupProvider(
 		logger.WarnCF("gateway", "Gateway started without default model", map[string]any{
 			"limited_mode": true,
 		})
-		return &startupBlockedProvider{reason: reason}, "", nil
+		return &startupBlockedProvider{reason: reason}, nil
 	}
 
-	provider, modelID, err := providers.CreateProvider(cfg)
+	provider, _, err := providers.CreateProvider(cfg)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
-	return provider, modelID, nil
+	return provider, nil
 }
 
 func setupAndStartServices(
@@ -603,7 +599,7 @@ func handleConfigReload(
 	logger.Info("  Stopping all services...")
 	stopAndCleanupServices(runningServices, serviceShutdownTimeout, true)
 
-	newProvider, newModelID, err := createStartupProvider(newCfg, allowEmptyStartup)
+	newProvider, err := createStartupProvider(newCfg, allowEmptyStartup)
 	if err != nil {
 		logger.Errorf("  ⚠ Error creating new provider: %v", err)
 		logger.Warn("  Attempting to restart services with old provider and config...")
@@ -611,10 +607,6 @@ func handleConfigReload(
 			logger.Errorf("  ⚠ Failed to restart services: %v", restartErr)
 		}
 		return fmt.Errorf("error creating new provider: %w", err)
-	}
-
-	if newModelID != "" {
-		newCfg.Agents.Defaults.ModelName = newModelID
 	}
 
 	reloadCtx, reloadCancel := context.WithTimeout(context.Background(), providerReloadTimeout)
