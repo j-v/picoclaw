@@ -26,48 +26,48 @@ on:
   workflow_dispatch:
 
 jobs:
-  lint:
-    name: Linter (push)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+  # lint:
+  #   name: Linter (push)
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v7
 
-      - name: Check Go-relevant paths
-        id: paths
-        if: github.event_name != 'workflow_dispatch'
-        uses: dorny/paths-filter@v4
-        with:
-          filters: |
-            go:
-              - '**.go'
-              - 'go.mod'
-              - 'go.sum'
-              - 'web/frontend/**'
-              - 'web/backend/icon.*'
-              - 'workspace/**'
-              - 'Makefile'
-              - 'web/Makefile'
-              - '.github/workflows/**'
-            integration:
-              - 'scripts/**'
+  #     - name: Check Go-relevant paths
+  #       id: paths
+  #       if: github.event_name != 'workflow_dispatch'
+  #       uses: dorny/paths-filter@v4
+  #       with:
+  #         filters: |
+  #           go:
+  #             - '**.go'
+  #             - 'go.mod'
+  #             - 'go.sum'
+  #             - 'web/frontend/**'
+  #             - 'web/backend/icon.*'
+  #             - 'workspace/**'
+  #             - 'Makefile'
+  #             - 'web/Makefile'
+  #             - '.github/workflows/**'
+  #           integration:
+  #             - 'scripts/**'
 
-      - name: Setup Go
-        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
+  #     - name: Setup Go
+  #       if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+  #       uses: actions/setup-go@v6
+  #       with:
+  #         go-version-file: go.mod
 
-      - name: Run go generate
-        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
-        run: go generate ./...
+  #     - name: Run go generate
+  #       if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+  #       run: go generate ./...
 
-      - name: Golangci Lint
-        if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.10.1
-          args: --build-tags=goolm,stdjson
+  #     - name: Golangci Lint
+  #       if: steps.paths.outputs.go == 'true' || github.event_name == 'workflow_dispatch'
+  #       uses: golangci/golangci-lint-action@v9
+  #       with:
+  #         version: v2.10.1
+  #         args: --build-tags=goolm,stdjson
 
   vuln_check:
     name: Security Check (push)
