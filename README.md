@@ -28,6 +28,10 @@
 
 **PicoClaw** is an ultra-lightweight personal AI assistant inspired by [NanoBot](https://github.com/HKUDS/nanobot). It was rebuilt from the ground up in **Go** through a "self-bootstrapping" process — the AI Agent itself drove the architecture migration and code optimization.
 
+> [!NOTE]
+> **This repo is a fork of [sipeed/picoclaw](https://github.com/sipeed/picoclaw)** that adds a **self-modifying loop** on top of upstream: the assistant authors changes to its own source from chat, GitHub builds and tests them, and a watchdog on the device deploys them — after *your* merge.
+> → [Self-Modifying Loop](#-self-modifying-loop-fork-addition) · [Full setup & operating guide](docs/PIPELINE-README.md)
+
 **Runs on $10 hardware with <10MB RAM** — that's 99% less memory than OpenClaw and 98% cheaper than a Mac mini!
 
 <table align="center">
@@ -115,6 +119,8 @@
 
 🧠 **Smart routing**: Rule-based model routing — simple queries go to lightweight models, saving API costs.
 
+🔁 **Self-modifying loop** *(fork addition)*: The agent authors changes to its own source from chat; GitHub builds and tests them; a watchdog deploys to the device after you merge. See [Self-Modifying Loop](#-self-modifying-loop-fork-addition).
+
 _*Recent builds may use 10-20MB due to rapid PR merges. Resource optimization is planned. Boot speed comparison based on 0.8GHz single-core benchmarks (see table below)._
 
 <div align="center">
@@ -169,6 +175,76 @@ PicoClaw can be deployed on virtually any Linux device!
 <https://private-user-images.githubusercontent.com/83055338/547056448-e7b031ff-d6f5-4468-bcca-5726b6fecb5c.mp4>
 
 🌟 More Deployment Cases Await!
+
+## 🔁 Self-Modifying Loop (fork addition)
+
+> **Upstream PicoClaw is an assistant. This fork is an assistant that can rebuild itself.**
+
+The agent can change its own source, and those changes flow to the device it runs
+on — automatically, with a human gate at the one place that matters.
+
+```
+ you: "the deploy watchdog re-deployed a failed run — add a guard"
+                       │
+                       ▼
+        ┌──────────────┴───────────────┐
+        │  PicoClaw (authoring)        │  edits source → pre-push checks
+        │  skills/dev-cycle            │  → commit → push fix/… branch
+        └──────────────┬───────────────┘
+                       ▼
+        ┌──────────────┴───────────────┐
+        │  GitHub Actions              │  auto-pr.yml opens the PR (~30s)
+        │                              │  build-arm64.yml cross-compiles
+        │                              │  gitleaks + tests/lint/security
+        └──────────────┬───────────────┘
+                       ▼
+            📱 YOU merge the PR ← the only human step
+                       ▼
+        ┌──────────────┴───────────────┐
+        │  Watchdog (on the device)    │  downloads artifact → pre-flight
+        │  deploy-picoclaw.sh          │  → health check → auto-rollback
+        └──────────────────────────────┘
+             merge → live in 1–3 minutes
+```
+
+**What's added on top of upstream:**
+
+| Capability | How it works |
+|---|---|
+| 🗣️ **Author from chat** | The [`dev-cycle`](skills/dev-cycle/SKILL.md) skill turns "ship the fix for X" into edits, commits, pushes, and CI monitoring — announcing each of its 7 steps so nothing is silent. |
+| 🤖 **No PR permission needed** | [`auto-pr.yml`](.github/workflows/auto-pr.yml) opens the PR as `github-actions[bot]` on any `fix/**`, `feat/**`, `feature/**` push. The agent's token can't create, approve, or merge PRs — by design. |
+| 🔒 **One human gate** | You approve + merge. Branch protection forbids direct pushes to `main`, even for admins and the device's deploy key. |
+| 📦 **Cross-compiled on GitHub** | [`build-arm64.yml`](.github/workflows/build-arm64.yml) builds `linux/arm64` binaries on free runners — no toolchain, no compile load, and no OOM on a 1 GB board. Non-build changes skip the build and never deploy. |
+| 🚚 **Self-deploying device** | [`deploy-picoclaw.sh`](deploy-picoclaw.sh) polls CI, verifies both binaries, health-checks the new release, and rolls back automatically if it doesn't come up |
+| ↩️ **Automatic rollback** | Failed health check → roll back to the last good release → retry once → give up loudly. Every deploy, rollback, and emergency pings you. |
+| 🧰 **One-command bootstrap** | [`scripts/setup-picoclaw.sh`](scripts/setup-picoclaw.sh) installs the watchdog, user services and log rotation, with no root required. |
+| 🔍 **Secret scanning** | [`gitleaks.yml`](.github/workflows/gitleaks.yml) on every push (a required check) plus a local pre-commit hook for fast feedback. |
+
+**Why it's worth the setup:** you describe intent in a chat window and get a
+reviewed, tested, deployed binary minutes later — on a $35 board, with free CI
+and no server to babysit.
+
+**All of it lives in this repo** — the workflows, the watchdog, the skill, and
+the bootstrap script. What it needs from you is a **one-time setup** (GitHub
+settings in the browser, a fine-grained token on the device, then run
+[`scripts/setup-picoclaw.sh`](scripts/setup-picoclaw.sh)) — roughly an hour,
+detailed in [Pipeline §4 — Setup walkthrough](docs/PIPELINE-README.md#4-setup-walkthrough).
+
+**Go deeper:**
+
+| Doc | What's inside |
+|---|---|
+| 📘 [Pipeline, Setup & Self-Authoring Guide](docs/PIPELINE-README.md) | The complete reference: architecture, setup walkthrough, the operating loop, troubleshooting, security model |
+| 🧠 [`skills/dev-cycle/SKILL.md`](skills/dev-cycle/SKILL.md) | The agent's codified loop — what `/use dev-cycle` engages |
+| 🏗️ [Pipeline §2 — Architecture](docs/PIPELINE-README.md#2-architecture) | Components, the journey of a change, release layout, the rollback cascade |
+| ⚙️ [Pipeline §4 — Setup walkthrough](docs/PIPELINE-README.md#4-setup-walkthrough) | GitHub settings → token → setup script → first deploy, step by step |
+| 🔁 [Pipeline §5 — The self-authoring loop](docs/PIPELINE-README.md#5-the-self-authoring-loop-operating-day-to-day) | Day-to-day operation: `/dev-cycle` quick start, examples, branching, failure rules |
+| 🛡️ [Pipeline §7 — Security model](docs/PIPELINE-README.md#7-security-model) | The trust boundary: what the agent can and cannot do |
+
+> **Not the fork's own feature:** PicoClaw also has a separate
+> [agent self-evolution](docs/architecture/agent-self-evolution.md) runtime
+> (learning records → skill drafts). That's upstream. The section above describes
+> the *code* loop: source changes, CI, and deployment.
 
 ## 📦 Install
 
@@ -643,6 +719,7 @@ For detailed guides beyond this README:
 
 | Topic | Description |
 |-------|-------------|
+| [Self-Deploy Pipeline & Self-Authoring](docs/PIPELINE-README.md) | **Fork addition** — let PicoClaw author its own changes: architecture, setup, day-to-day loop, troubleshooting, security model |
 | [Docker & Quick Start](docs/guides/docker.md) | Docker Compose setup, Launcher/Agent modes |
 | [Chat Apps](docs/guides/chat-apps.md) | All 18+ channel setup guides |
 | [Configuration](docs/guides/configuration.md) | Environment variables, workspace layout, security sandbox |
