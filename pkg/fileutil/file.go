@@ -55,6 +55,15 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	// Preserve the existing file mode on overwrite. The temp file below is
+	// created with perm and then renamed over the target, so without this the
+	// destination silently loses its permission bits (e.g. a 0755 script edited
+	// through the agent file tools becomes 0600 and can no longer be executed).
+	// Callers therefore pass a *default* for new files, not an override.
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		perm = info.Mode().Perm()
+	}
+
 	// Create temp file in the same directory (ensures atomic rename works)
 	// Using a hidden prefix (.tmp-) to avoid issues with some tools
 	tmpFile, err := os.OpenFile(

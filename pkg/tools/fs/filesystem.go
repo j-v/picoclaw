@@ -1077,7 +1077,8 @@ func (h *hostFs) ReadDir(path string) ([]os.DirEntry, error) {
 
 func (h *hostFs) WriteFile(path string, data []byte) error {
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
-	// Using 0o600 (owner read/write only) for secure default permissions.
+	// 0o600 is the secure default for new files; existing files keep their mode so
+	// editing a script does not make it unexecutable.
 	return fileutil.WriteFileAtomic(path, data, 0o600)
 }
 
@@ -1153,10 +1154,17 @@ func (r *sandboxFs) WriteFile(path string, data []byte) error {
 		}
 
 		// Use atomic write pattern with explicit sync for flash storage reliability.
-		// Using 0o600 (owner read/write only) for secure default permissions.
+		// 0o600 (owner read/write only) is the secure default for *new* files.
+		// Existing files keep their current mode, so editing a script does not
+		// strip its execute bit (see fileutil.WriteFileAtomic).
+		perm := os.FileMode(0o600)
+		if info, statErr := root.Stat(relPath); statErr == nil && info.Mode().IsRegular() {
+			perm = info.Mode().Perm()
+		}
+
 		tmpRelPath := fmt.Sprintf(".tmp-%d-%d", os.Getpid(), time.Now().UnixNano())
 
-		tmpFile, err := root.OpenFile(tmpRelPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		tmpFile, err := root.OpenFile(tmpRelPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 		if err != nil {
 			root.Remove(tmpRelPath)
 			return fmt.Errorf("failed to open temp file: %w", err)
@@ -1174,6 +1182,14 @@ func (r *sandboxFs) WriteFile(path string, data []byte) error {
 			_ = tmpFile.Close()
 			root.Remove(tmpRelPath)
 			return fmt.Errorf("failed to sync temp file: %w", err)
+		}
+
+		// Set the mode explicitly: OpenFile applies the process umask, so without
+		// this a preserved 0644 would land as 0644&^umask on restrictive systems.
+		if err := tmpFile.Chmod(perm); err != nil {
+			_ = tmpFile.Close()
+			root.Remove(tmpRelPath)
+			return fmt.Errorf("failed to set permissions: %w", err)
 		}
 
 		if err := tmpFile.Close(); err != nil {
