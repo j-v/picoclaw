@@ -471,6 +471,12 @@ Use `mode = lines` when:
 | `tools.exec.custom_deny_patterns` | string[] | `[]` | Custom regex patterns to block |
 | `tools.exec.custom_allow_patterns` | string[] | `[]` | Custom regex patterns to allow |
 
+> **Exemption scope:** `custom_allow_patterns` exempts only the text each pattern actually matches, not the whole
+> command line. A built-in deny pattern is still enforced anywhere outside those matched spans. So with
+> `custom_allow_patterns: ["git push"]`, the command `git push fork main` is allowed, while
+> `pkill -f worker # git push` is still blocked — the allow-listed phrase cannot be used to smuggle an unrelated
+> command past the deny list. `custom_deny_patterns` always take precedence over both.
+
 > **Security Note:** Symlink protection is enabled by default — all file paths are resolved through `filepath.EvalSymlinks` before whitelist matching, preventing symlink escape attacks.
 
 #### Known Limitation: Child Processes From Build Tools

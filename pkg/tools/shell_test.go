@@ -2012,3 +2012,129 @@ func TestShellTool_CustomAllowDoesNotBecomeStrictAllowlist(t *testing.T) {
 		t.Fatalf("custom allow patterns should not become a strict allowlist, got: %q", got)
 	}
 }
+
+// TestShellTool_CustomAllowExemptionIsSpanScoped verifies that a custom allow
+// pattern only exempts the region of the command line it actually matched. A
+// deny match anywhere else must still block the command, otherwise an
+// allow-listed fragment can smuggle arbitrary deny-listed commands through.
+func TestShellTool_CustomAllowExemptionIsSpanScoped(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.CustomAllowPatterns = []string{`git push`}
+
+	tool, err := NewExecToolWithConfig(t.TempDir(), false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		command string
+		blocked bool
+	}{
+		// The allow pattern itself, and legitimate uses of it.
+		{"push to fork", "git push fork fix/x", false},
+		{"push to upstream", "git push upstream main", false},
+		{"chained after cd", "cd /tmp && git push fork main", false},
+		{"chained with echo", "git push fork main && echo done", false},
+
+		// The same phrase inside quotes or a grep pattern is harmless: it is the
+		// only thing that would have been denied, and it is covered.
+		{"quoted grep pattern", `grep -rn "git push" skills/`, false},
+		{"echo into file", `echo 'git push' >> notes.txt`, false},
+
+		// Deny-listed commands riding along with an allow-listed phrase.
+		{"pkill in comment", "pkill -f nosuchp12345 # git push", true},
+		{"chmod in comment", "chmod 600 probe.sh # git push", true},
+		{"sudo in comment", "sudo cat /etc/shadow # git push", true},
+		{"rm before push", "rm -rf /tmp/x && git push", true},
+		{"rm after push", "git push fork x && rm -rf /tmp/y", true},
+		{"command substitution", "git push fork $(date)", true},
+		{"backtick substitution", "git push fork `hostname`", true},
+		{"pipe to sh", "git push fork main | sh", true},
+		{"pipe to bash", "git push fork main 2>&1 | bash", true},
+		{"eval in comment", "eval echo hi # git push", true},
+		{"pkill after semicolon", "git push fork main; pkill foo", true},
+		{"newline then sudo", "git push fork x\nsudo reboot", true},
+		{"newline then rm", "git push origin main\nrm -rf /tmp/z", true},
+
+		// Without the allow phrase nothing changes: these were always blocked.
+		{"pkill alone", "pkill -f nothing12345", true},
+		{"sudo alone", "sudo ls", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tool.guardCommand(tt.command, t.TempDir())
+			if tt.blocked && got == "" {
+				t.Fatalf("%q should be blocked, but passed the guard", tt.command)
+			}
+			if !tt.blocked && got != "" {
+				t.Fatalf("%q should pass the guard, got: %q", tt.command, got)
+			}
+		})
+	}
+}
+
+// TestShellTool_CustomAllowSpanDoesNotWeakenSpecificPatterns verifies that a
+// narrow custom allow pattern keeps blocking everything it does not match.
+func TestShellTool_CustomAllowSpanDoesNotWeakenSpecificPatterns(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.CustomAllowPatterns = []string{`\bgit\s+push\s+origin\b`}
+
+	tool, err := NewExecToolWithConfig(t.TempDir(), false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+
+	if got := tool.guardCommand("git push origin main", t.TempDir()); got != "" {
+		t.Fatalf("matching push should pass, got: %q", got)
+	}
+	if got := tool.guardCommand("git push upstream main", t.TempDir()); got == "" {
+		t.Fatal("non-matching push should stay blocked")
+	}
+	if got := tool.guardCommand("pkill foo # git push origin main", t.TempDir()); got == "" {
+		t.Fatal("a covered push phrase must not exempt an unrelated pkill")
+	}
+}
+
+// TestShellTool_DenyGitPushWithOptions ensures the deny pattern still catches
+// pushes that carry options between "git" and "push".
+func TestShellTool_DenyGitPushWithOptions(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+
+	tool, err := NewExecToolWithConfig(t.TempDir(), false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+
+	blocked := []string{
+		"git push fork fix/x",
+		"git -C /repo push fork fix/x",
+		"git -c core.pager=cat push origin main",
+		"git --no-pager push",
+		"git --git-dir=/repo/.git push",
+		"git push --force",
+	}
+	for _, cmd := range blocked {
+		if got := tool.guardCommand(cmd, t.TempDir()); got == "" {
+			t.Errorf("%q should be blocked by the deny pattern", cmd)
+		}
+	}
+
+	allowed := []string{
+		"git log --oneline -3",
+		"git log --grep push",
+		"git log --author push",
+		"git commit -m push",
+		"git fetch fork",
+		"git status --short",
+	}
+	for _, cmd := range allowed {
+		if got := tool.guardCommand(cmd, t.TempDir()); got != "" {
+			t.Errorf("%q should not be blocked, got: %q", cmd, got)
+		}
+	}
+}

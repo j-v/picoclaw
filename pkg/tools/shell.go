@@ -93,8 +93,14 @@ var (
 		regexp.MustCompile(`\bdnf\s+(install|remove)\b`),
 		regexp.MustCompile(`\bdocker\s+run\b`),
 		regexp.MustCompile(`\bdocker\s+exec\b`),
-		regexp.MustCompile(`\bgit\s+push\b`),
-		regexp.MustCompile(`\bgit\s+force\b`),
+		// Allow git global options between the subcommand name and "push", so
+		// forms like `git -C /repo push` or `git -c k=v push` are still caught.
+		regexp.MustCompile(
+			`\bgit(?:(?:\s+(?:-[Cc]\s+\S+` +
+				`|--(?:git-dir|work-tree|namespace|exec-path)(?:=|\s+)\S+` +
+				`|--no-pager|--(?:no-)?paginate|--bare|--literal-pathspecs))*)` +
+				`\s+(?:push|force)\b`,
+		),
 		regexp.MustCompile(`\bssh\b.*@`),
 		regexp.MustCompile(`\beval\b`),
 		regexp.MustCompile(`\bsource\s+.*\.sh\b`),
@@ -1152,9 +1158,24 @@ func (t *ExecTool) commandMatchesAllowPattern(lower string) bool {
 	return false
 }
 
-func (t *ExecTool) commandMatchesCustomAllowPattern(lower string) bool {
+// customAllowSpans returns the byte offsets of every custom allow pattern match
+// in lower. These spans define the regions of the command line that the operator
+// has explicitly permitted, and are used to grant a per-match exemption from the
+// default deny patterns.
+func (t *ExecTool) customAllowSpans(lower string) [][2]int {
+	var spans [][2]int
 	for _, pattern := range t.customAllowPatterns {
-		if pattern.MatchString(lower) {
+		for _, m := range pattern.FindAllStringIndex(lower, -1) {
+			spans = append(spans, [2]int{m[0], m[1]})
+		}
+	}
+	return spans
+}
+
+// spanCovered reports whether span lies entirely inside one of spans.
+func spanCovered(span [2]int, spans [][2]int) bool {
+	for _, s := range spans {
+		if span[0] >= s[0] && span[1] <= s[1] {
 			return true
 		}
 	}
@@ -1173,11 +1194,14 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 		}
 	}
 
-	// Default deny patterns can be exempted by custom allow patterns,
-	// so operators can selectively permit normally-blocked commands.
-	if !t.commandMatchesCustomAllowPattern(lower) {
-		for _, pattern := range t.denyPatterns {
-			if pattern.MatchString(lower) {
+	// Default deny patterns can be exempted by custom allow patterns, but only
+	// for the specific region the allow pattern matched. A deny match that is not
+	// covered by an allow span is still blocked, so an allow-listed fragment
+	// elsewhere in the command cannot disable the whole deny list.
+	allowSpans := t.customAllowSpans(lower)
+	for _, pattern := range t.denyPatterns {
+		for _, m := range pattern.FindAllStringIndex(lower, -1) {
+			if !spanCovered([2]int{m[0], m[1]}, allowSpans) {
 				return "Command blocked by safety guard (dangerous pattern detected)"
 			}
 		}
