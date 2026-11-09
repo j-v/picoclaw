@@ -118,7 +118,7 @@ func TestNextConnectRetryBackoffHandlesZero(t *testing.T) {
 }
 
 // TestConnectRetryLoopStopsOnCancel verifies the retry goroutine exits when the
-// channel context is cancelled, so Stop() does not leak a goroutine that keeps
+// channel context is canceled, so Stop() does not leak a goroutine that keeps
 // probing Discord after shutdown.
 func TestConnectRetryLoopStopsOnCancel(t *testing.T) {
 	t.Parallel()

@@ -62,7 +62,7 @@ type DiscordChannel struct {
 	cancelTTS context.CancelFunc
 	ttsPlayID uint64
 
-	// connectMu serialises connect attempts and guards the retry goroutine
+	// connectMu serializes connect attempts and guards the retry goroutine
 	// bookkeeping so Start/Stop cannot race with a pending retry.
 	connectMu sync.Mutex
 	retrying  bool
