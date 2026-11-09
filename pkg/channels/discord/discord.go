@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 
 const (
 	sendTimeout = 10 * time.Second
+	// The initial-connection retry policy constants live in connect_retry.go.
 )
 
 var (
@@ -59,6 +61,11 @@ type DiscordChannel struct {
 	ttsMu     sync.Mutex
 	cancelTTS context.CancelFunc
 	ttsPlayID uint64
+
+	// connectMu serializes connect attempts and guards the retry goroutine
+	// bookkeeping so Start/Stop cannot race with a pending retry.
+	connectMu sync.Mutex
+	retrying  bool
 }
 
 func NewDiscordChannel(
@@ -109,6 +116,36 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
+	c.session.AddHandler(c.handleMessage)
+
+	go c.listenVoiceControl(c.ctx)
+
+	// First attempt happens synchronously so that a genuine configuration
+	// problem (for example an invalid token) still fails loudly at startup.
+	err := c.connect()
+	if err == nil {
+		return nil
+	}
+	if isPermanentConnectError(err) {
+		return err
+	}
+
+	// Transient failure (DNS not ready, network unreachable, Discord 5xx...).
+	// Keep the gateway starting and retry in the background so the bot comes
+	// back on its own once the network recovers.
+	logger.WarnCF("discord", "Discord bot failed to connect, retrying in background", map[string]any{
+		"error":         err.Error(),
+		"retry_initial": defaultConnectRetryInitial.String(),
+		"retry_max":     defaultConnectRetryMax.String(),
+	})
+	c.startConnectRetry()
+
+	return nil
+}
+
+// connect performs the full initial connection sequence: identify the bot user
+// over REST, then open the gateway websocket. It is safe to call repeatedly.
+func (c *DiscordChannel) connect() error {
 	// Get bot user ID before opening session to avoid race condition
 	botUser, err := c.session.User("@me")
 	if err != nil {
@@ -116,11 +153,7 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 	}
 	c.botUserID = botUser.ID
 
-	c.session.AddHandler(c.handleMessage)
-
-	go c.listenVoiceControl(c.ctx)
-
-	if err := c.session.Open(); err != nil {
+	if err := c.session.Open(); err != nil && !errors.Is(err, discordgo.ErrWSAlreadyOpen) {
 		return fmt.Errorf("failed to open discord session: %w", err)
 	}
 
@@ -130,8 +163,74 @@ func (c *DiscordChannel) Start(ctx context.Context) error {
 		"username": botUser.Username,
 		"user_id":  botUser.ID,
 	})
-
 	return nil
+}
+
+// startConnectRetry launches at most one background retry loop.
+func (c *DiscordChannel) startConnectRetry() {
+	c.connectMu.Lock()
+	defer c.connectMu.Unlock()
+
+	if c.retrying {
+		return
+	}
+	c.retrying = true
+
+	go func() {
+		defer func() {
+			c.connectMu.Lock()
+			c.retrying = false
+			c.connectMu.Unlock()
+		}()
+		c.connectRetryLoop()
+	}()
+}
+
+// connectRetryLoop retries connect() with capped exponential backoff until it
+// succeeds or the channel is stopped.
+func (c *DiscordChannel) connectRetryLoop() {
+	backoff := defaultConnectRetryInitial
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			logger.InfoC("discord", "Discord connect retry stopped")
+			return
+		case <-time.After(backoff):
+		}
+
+		// Re-check between the timer firing and the connect attempt so a
+		// shutdown during the backoff window does not touch the session
+		// after Stop() has closed it.
+		if c.ctx.Err() != nil {
+			logger.InfoC("discord", "Discord connect retry stopped")
+			return
+		}
+
+		logger.InfoCF("discord", "Retrying Discord connection", map[string]any{
+			"backoff": backoff.String(),
+		})
+
+		err := c.connect()
+		if err == nil {
+			logger.InfoC("discord", "Discord bot reconnected after retry")
+			return
+		}
+
+		if isPermanentConnectError(err) {
+			logger.ErrorCF("discord", "Discord connect failed with permanent error, giving up", map[string]any{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		logger.WarnCF("discord", "Discord connect retry failed", map[string]any{
+			"error":   err.Error(),
+			"backoff": backoff.String(),
+		})
+
+		backoff = nextConnectRetryBackoff(backoff)
+	}
 }
 
 func (c *DiscordChannel) Stop(ctx context.Context) error {
