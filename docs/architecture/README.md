@@ -3,6 +3,7 @@
 Internal architecture notes for major runtime mechanisms and subsystem design.
 
 - [Steering](steering.md): injecting messages into a running agent loop between tool calls.
+- [Tool Limit Wrap-Up](tool-limit-wrapup.md): what happens when a turn exhausts `max_tool_iterations`.
 - [SubTurn Mechanism](subturn.md): sub-agent coordination, concurrency control, and lifecycle handling.
 - [Session System](session-system.md): session scope allocation, JSONL persistence, alias compatibility, and migration. ([ZH](session-system.zh.md))
 - [Routing System](routing-system.md): agent dispatch, session policy selection, and light/heavy model routing. ([ZH](routing-system.zh.md))

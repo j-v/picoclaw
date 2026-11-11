@@ -5395,8 +5395,16 @@ func TestAgentLoop_ToolLimitUsesDedicatedFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessDirectWithChannel failed: %v", err)
 	}
-	if response != toolLimitResponse {
-		t.Fatalf("response = %q, want %q", response, toolLimitResponse)
+	// The static tool-limit string was replaced by a deterministic wrap-up summary that
+	// reports the budget and the tools that actually ran.
+	if !strings.Contains(response, "Tool budget reached") {
+		t.Fatalf("response = %q, want tool-limit summary", response)
+	}
+	if !strings.Contains(response, "tool_limit_test_tool") {
+		t.Fatalf("response = %q, want tool name in summary", response)
+	}
+	if strings.Contains(response, "I've reached `max_tool_iterations`") {
+		t.Fatalf("response still uses the removed static fallback: %q", response)
 	}
 
 	defaultAgent := al.registry.GetDefaultAgent()
@@ -5417,8 +5425,8 @@ func TestAgentLoop_ToolLimitUsesDedicatedFallback(t *testing.T) {
 		t.Fatalf("history len = %d, want 4", len(history))
 	}
 	assertRoles(t, history, "user", "assistant", "tool", "assistant")
-	if history[3].Content != toolLimitResponse {
-		t.Fatalf("final assistant content = %q, want %q", history[3].Content, toolLimitResponse)
+	if !strings.Contains(history[3].Content, "Tool budget reached") {
+		t.Fatalf("final assistant content = %q, want tool-limit summary", history[3].Content)
 	}
 }
 

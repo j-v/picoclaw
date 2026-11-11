@@ -213,6 +213,7 @@ type turnState struct {
 	gracefulInterrupt     bool
 	gracefulInterruptHint string
 	gracefulTerminalUsed  bool
+	toolLimitWrapUp       bool
 	hardAbort             bool
 	providerCancel        context.CancelFunc
 	turnCancel            context.CancelFunc
