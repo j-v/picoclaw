@@ -46,7 +46,7 @@ func (ts *turnState) toolLimitWrapUpActive() bool {
 //
 // It must be called after tool execution, once the iteration counter has reached
 // MaxIterations. The loop's existing graceful-interrupt clause then extends the turn by exactly
-// one call, so the configured budget is honoured rather than silently reduced.
+// one call, so the configured budget is honored rather than silently reduced.
 //
 // pendingSteering defers the wrap-up while a steering message is still waiting: someone who
 // interrupts an over-budget turn deserves a real answer from the tools they just asked for, not

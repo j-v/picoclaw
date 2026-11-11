@@ -17,7 +17,7 @@ on the first call produced identical output, and there was nothing to act on.
 ## What happens now
 
 When the tool budget is spent, the turn is granted **one extra, tool-less LLM call** to
-summarise what it did, what remains, and the best next step. The result is a message
+summarize what it did, what remains, and the best next step. The result is a message
 that always contains a deterministic baseline, enriched by the model when that call
 succeeds.
 
@@ -46,7 +46,7 @@ task needs more tool steps.
 
 | Decision | Choice | Rationale |
 | --- | --- | --- |
-| Budget for the wrap-up call | **Extra call** (`N` tool iterations + 1 wrap-up) | The configured budget is honoured exactly rather than silently reduced. The loop's existing graceful-interrupt clause already permits it, so no loop-condition change was needed. |
+| Budget for the wrap-up call | **Extra call** (`N` tool iterations + 1 wrap-up) | The configured budget is honored exactly rather than silently reduced. The loop's existing graceful-interrupt clause already permits it, so no loop-condition change was needed. |
 | How the summary is produced | **Hybrid** — deterministic baseline, enriched by one LLM call | The feature fires exactly when turns run long and providers may be flaky. Baseline-first means a failed enrichment still yields a useful message instead of reproducing the dead end. |
 | Content | Budget, tool usage with ✅/❌ counts, one-line errors, skills used, and a next-step prompt | Diagnostic enough to explain *why* the budget was spent. |
 | Turn fate | **End the turn** | Session history is saved, so a re-prompt resumes naturally. Auto-continue would undermine the cap. |
@@ -86,7 +86,7 @@ The baseline is rendered from `toolExecutions` regardless of what the model retu
 - **A `TurnEndStatusToolLimit` status** — considered, deferred. Turns still report
   `completed`. If tuning the limit becomes a priority, this is the natural follow-up: it
   would make "how often do I hit the limit?" queryable from `turn.end` events.
-- **Config to disable it** — there is no compelling behaviour to preserve.
+- **Config to disable it** — there is no compelling behavior to preserve.
 
 ## Tuning the limit
 

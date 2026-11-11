@@ -283,7 +283,8 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 	}
 
 	if finalContent == "" {
-		if ts.toolLimitWrapUpActive() || (ts.currentIteration() >= ts.agent.MaxIterations && ts.agent.MaxIterations > 0) {
+		budgetExhausted := ts.currentIteration() >= ts.agent.MaxIterations && ts.agent.MaxIterations > 0
+		if ts.toolLimitWrapUpActive() || budgetExhausted {
 			finalContent = buildToolLimitSummary(ts, "")
 		} else {
 			finalContent = ts.opts.DefaultResponse
