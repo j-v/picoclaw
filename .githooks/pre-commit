@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Pre-commit: secrets + formatting. Fast enough to keep enabled (~seconds).
+#
+# Full linting deliberately does NOT run here: a cold changed-package lint is
+# ~9 minutes on a memory-constrained box, and a multi-minute commit hook gets
+# disabled by the first person it inconveniences. Formatting is the cheap
+# subset that catches most CI failures, and pre-push covers the rest.
+#
+# Install once with:  scripts/lint.sh --install-hooks
+# Bypass in emergencies: git commit --no-verify
+set -uo pipefail
+
+REPO=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$REPO" || exit 0
+
+# shellcheck source=scripts/lib/lint-env.sh
+. "$REPO/scripts/lib/lint-env.sh"
+
+FAILED=0
+
+# --- 1. Secret scan (staged content only) ---------------------------------
+GITLEAKS_BIN=""
+if GITLEAKS_BIN=$(picoclaw_resolve_gitleaks); then
+  echo "pre-commit: scanning staged changes for secrets"
+  if ! "$GITLEAKS_BIN" protect --staged --verbose 2>/dev/null; then
+    echo "pre-commit: BLOCKED -- gitleaks reported findings or errored."
+    echo "            False positive? Add '# gitleaks:allow' or allowlist it"
+    echo "            in .gitleaks.toml. Bypass: git commit --no-verify"
+    FAILED=1
+  fi
+else
+  echo "pre-commit: gitleaks not installed, skipping secret scan"
+  echo "            install v8.21.2 (NOT @latest on ARM) to enable it"
+fi
+
+# --- 2. Go formatting (staged .go files only) -----------------------------
+#
+# Uses `golangci-lint fmt` rather than bare gofmt on purpose: CI enforces the
+# full formatter set (gofmt + gci + golines), and golines' 120-column limit has
+# failed CI on this project before. gofmt alone would let that through.
+STAGED_GO=$(git diff --cached --name-only --diff-filter=ACM -- '*.go' 2>/dev/null)
+
+if [ -n "$STAGED_GO" ]; then
+  if ! command -v golangci-lint >/dev/null 2>&1 || ! picoclaw_resolve_go; then
+    echo "pre-commit: golangci-lint or go missing -- CANNOT verify formatting."
+    echo "            failing rather than silently passing."
+    echo "            Bypass: git commit --no-verify"
+    FAILED=1
+  else
+    echo "pre-commit: checking formatting"
+    FMT_OUT=$(golangci-lint fmt --diff $STAGED_GO 2>&1)
+    FMT_RC=$?
+    if [ "$FMT_RC" -ne 0 ] || [ -n "$FMT_OUT" ]; then
+      echo "$FMT_OUT" | head -40
+      echo "pre-commit: BLOCKED -- formatting differences above."
+      echo "            fix with: golangci-lint fmt $STAGED_GO"
+      FAILED=1
+    fi
+  fi
+fi
+
+[ "$FAILED" -eq 0 ] && echo "pre-commit: ok"
+exit "$FAILED"

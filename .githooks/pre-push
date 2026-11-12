@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Pre-push: lint the packages actually being pushed.
+#
+# This is the tier that catches real lint failures before CI. It lints only
+# packages changed relative to the base branch, which keeps a warm run around
+# 40 seconds. A cold run (after `go clean`, or on a fresh clone) takes minutes;
+# prime it once with `scripts/lint.sh --warm` if the hook feels slow.
+#
+# The full-module lint is left to CI on purpose -- measured at 66 minutes
+# locally, dominated by a single cgo translation unit rather than by linting.
+#
+# Install once with:  scripts/lint.sh --install-hooks
+# Skip for a WIP push: PICOCLAW_SKIP_LINT=1 git push
+set -uo pipefail
+
+if [ -n "${PICOCLAW_SKIP_LINT:-}" ]; then
+  echo "pre-push: PICOCLAW_SKIP_LINT set, skipping lint"
+  exit 0
+fi
+
+# Nothing to do when no Go sources are part of this push.
+RANGE=$(git rev-parse --abbrev-ref --symbolic-full-name '@{push}' 2>/dev/null || echo "")
+CHANGED=$(git diff --name-only HEAD -- '*.go' 2>/dev/null)
+if [ -z "$CHANGED" ] && [ -z "$RANGE" ]; then
+  exit 0
+fi
+
+REPO=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+cd "$REPO" || exit 0
+
+if [ ! -x scripts/lint.sh ]; then
+  echo "pre-push: scripts/lint.sh missing or not executable, skipping"
+  exit 0
+fi
+
+echo "pre-push: linting changed packages (set PICOCLAW_SKIP_LINT=1 to skip)"
+if ! scripts/lint.sh; then
+  echo ""
+  echo "pre-push: BLOCKED -- lint failed for the packages in this push."
+  echo "          Full output above. Common fixes:"
+  echo "            scripts/lint.sh --fmt   # fix formatting"
+  echo "            scripts/lint.sh         # re-run to see what remains"
+  echo "          Emergency bypass: PICOCLAW_SKIP_LINT=1 git push"
+  exit 1
+fi
+
+echo "pre-push: lint ok"
+exit 0
