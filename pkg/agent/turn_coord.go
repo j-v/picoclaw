@@ -194,6 +194,17 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 		ts.setPhase(TurnPhaseRunning)
 		ctrl, callErr := pipeline.CallLLM(ctx, turnCtx, ts, exec, iteration)
 		if callErr != nil {
+			// A failed wrap-up call must not surface as a turn error: the whole point of the
+			// baseline summary is to stay useful when the provider is unavailable, which is
+			// exactly the situation a long turn is likely to end in.
+			if ts.toolLimitWrapUpActive() {
+				logger.WarnCF("agent", "Tool-limit wrap-up call failed; using baseline summary", map[string]any{
+					"agent_id":  ts.agent.ID,
+					"iteration": iteration,
+					"error":     callErr.Error(),
+				})
+				break
+			}
 			turnStatus = TurnEndStatusError
 			return turnResult{}, callErr
 		}
@@ -215,8 +226,12 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 				turnStatus = TurnEndStatusError
 				return turnResult{}, fmt.Errorf("hook requested turn abort")
 			}
-			// Ensure empty response falls back to DefaultResponse
-			if finalContent == "" {
+			// Ensure empty response falls back to DefaultResponse. A tool-limit wrap-up always
+			// renders the deterministic baseline, with the model's own summary folded in when
+			// the wrap-up call produced one.
+			if ts.toolLimitWrapUpActive() {
+				finalContent = buildToolLimitSummary(ts, finalContent)
+			} else if finalContent == "" {
 				finalContent = ts.opts.DefaultResponse
 			}
 			result, finalizeErr := pipeline.Finalize(ctx, turnCtx, ts, exec, turnStatus, finalContent)
@@ -232,6 +247,9 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 				// Re-read exec.messages since ExecuteTools may have updated it
 				// (added tool results/skipped messages) before returning ControlContinue
 				messages = exec.messages
+				// Arm the graceful wrap-up once the tool budget is spent. The loop's
+				// graceful clause then grants exactly one extra, tool-less call.
+				al.maybeStartToolLimitWrapUp(ts, len(exec.pendingMessages))
 				continue
 			case ToolControlBreak:
 				// Hard abort: delegate to abortTurn (sets TurnEndStatusAborted)
@@ -265,8 +283,9 @@ func (al *AgentLoop) runTurn(ctx context.Context, ts *turnState, pipeline *Pipel
 	}
 
 	if finalContent == "" {
-		if ts.currentIteration() >= ts.agent.MaxIterations && ts.agent.MaxIterations > 0 {
-			finalContent = toolLimitResponse
+		budgetExhausted := ts.currentIteration() >= ts.agent.MaxIterations && ts.agent.MaxIterations > 0
+		if ts.toolLimitWrapUpActive() || budgetExhausted {
+			finalContent = buildToolLimitSummary(ts, "")
 		} else {
 			finalContent = ts.opts.DefaultResponse
 		}
