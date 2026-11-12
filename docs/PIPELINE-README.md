@@ -18,6 +18,7 @@
 5. [The self-authoring loop (operating day to day)](#5-the-self-authoring-loop-operating-day-to-day)
 6. [Troubleshooting common situations](#6-troubleshooting-common-situations)
    - [6.3 Rotating the GitHub token](#63-rotating-the-github-token-every-90-days-or-immediately-if-leaked)
+   - [6.4 A security advisory can appear after your branch is open](#64-a-security-advisory-can-appear-after-your-branch-is-open)
 7. [Security model](#7-security-model)
 8. [Optional hardening](#8-optional-hardening)
 9. [Reference](#9-reference)
@@ -1033,6 +1034,76 @@ Permissions:
   Workflows ........... none
 Expiration: 90 days
 ```
+
+### 6.4 A security advisory can appear *after* your branch is open
+
+This is the one failure the pipeline cannot catch on its own, and it is worth
+knowing because it is not a pipeline bug — it is a timing gap.
+
+`govulncheck` queries a **live** database. Go advisories are published on
+their own schedule, so a branch that passed Security Check this morning can
+fail it this afternoon with no code change:
+
+```
+Vulnerability #1: GO-2026-6859
+  More info: https://pkg.go.dev/vuln/GO-2026-6859
+```
+
+On PR #34 both checks ran within seconds of each other and **disagreed**:
+the gated `pr.yml` run actually scanned and failed after 66s, while the
+ungated push twin "passed" in 13s because it had skipped the scan entirely.
+Same tree, same instant, opposite verdicts — and the green one was the
+misleading one. The advisory (a `net/http` data race, `CVE-2026-97054`) had
+been published the day before, and the fix was `go1.26.11`, one patch above
+the pinned `1.26.10`.
+
+**Why neither CI path could see it at review time:**
+
+| Path | Trigger | Why it missed |
+|------|---------|---------------|
+| `pr.yml` → Security Check | `pull_request` | auto-pr opens PRs as `github-actions[bot]`, so the run sits gated until a human approves |
+| `push-checks.yml` → Security Check (push) | `push` | govulncheck is behind the Go paths filter; a branch touching no `.go` files passes in ~13s having scanned nothing |
+
+The push twin is ungated and would have caught it — but only for branches
+that actually change Go files. **A 13-second "pass" on a Go-less branch means
+*skipped*, not *clean*.** Read the duration before trusting the tick.
+
+**What actually protects you:** making Security Check a *required* check on
+`main` (Step 1). Then a failing advisory blocks the merge button regardless
+of which trigger noticed it. Without that, it is advisory-only and a human
+must choose to read it.
+
+**When it fires, the fix is usually a patch bump, not code:**
+
+```bash
+# 1. What exactly is wrong, and which versions are fixed?
+#    Check the "Affects" box: e.g. "before go1.26.11"
+curl -s https://vuln.go.dev/ID/GO-2026-6859.json | python3 -m json.tool
+
+# 2. Is a fixed toolchain actually released?
+curl -s "https://go.dev/dl/?mode=json&include=all" \
+  | python3 -c "import json,sys;print([r['version'] for r in json.load(sys.stdin) if r['version'].startswith('go1.26')])"
+
+# 3. Bump the directive (every workflow reads it via go-version-file)
+sed -i 's/^go 1\.26\.10$/go 1.26.11/' go.mod
+```
+
+`go.mod`'s `go` directive is the single source of truth here: every workflow
+uses `go-version-file: go.mod`, so one edit moves build, test, lint, and
+scan together. A `go`-directive-only bump does **not** change the module
+graph, so `go.sum` stays byte-identical and `go mod tidy` is unnecessary.
+
+**Two traps when bumping locally on a constrained box:**
+
+- `GOTOOLCHAIN=auto` (the default) makes the *old* local toolchain try to
+  download the new one on the next `go` command, which looks like a hang.
+  Expect it, or set `GOTOOLCHAIN=local` to fail fast and let CI do the work.
+- Research the advisory before deciding it is unreachable. On #34
+  `MaxBytesReader` is the body-cap idiom in the LINE webhook, three auth
+  endpoints, the update endpoint, and the web-fetch tool — each in a handler
+  that also writes a response, which is exactly the racy shape. A panic in a
+  webhook handler is a crash, not cosmetic, so the bump was warranted rather
+  than a paper exercise.
 
 ---
 
