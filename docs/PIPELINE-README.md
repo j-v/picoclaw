@@ -428,11 +428,12 @@ curl -sf http://localhost:18800                     # launcher responds
 nc -z localhost 18790 && echo "gateway open"        # gateway accepts
 ```
 
-### Step 4 — Gitleaks local hook (fast feedback, ~5 minutes)
+### Step 4 — Local hooks: secrets + lint (fast feedback, ~5 minutes)
 
-The CI gitleaks check is the enforcement layer; a **local** pre-commit hook
-gives you instant feedback while the agent commits. Install the pinned
-version — this matters on ARM:
+The CI checks are the enforcement layer; **local** hooks give you instant
+feedback while the agent commits. Two hooks, deliberately different in cost.
+
+Start with gitleaks — install the pinned version, this matters on ARM:
 
 ```bash
 # ⚠️ Pin v8.21.2 — later releases use a WASM regex engine that is
@@ -445,13 +446,87 @@ chmod u+rwx,go+rx ~/go/bin/gitleaks
 gitleaks version   # → 8.21.2
 ```
 
-Add `~/go/bin` to your PATH, then install the pre-commit hook — a small
-script that runs `gitleaks protect --staged` on every commit and blocks on
-findings:
+Then activate the versioned hooks and install the pinned linter (CI uses
+v2.10.1; matching it locally is what makes local results comparable):
+
+```bash
+# golangci-lint v2.10.1 — same version as .github/workflows/pr.yml
+mkdir -p ~/.local/bin
+curl -sL https://github.com/golangci/golangci-lint/releases/download/v2.10.1/golangci-lint-2.10.1-linux-arm64.tar.gz \
+  | tar -xz --strip-components=1 -C ~/.local/bin \
+      golangci-lint-2.10.1-linux-arm64/golangci-lint
+
+cd ~/src/picoclaw
+scripts/lint.sh --install-hooks   # sets core.hooksPath -> .githooks
+```
 
 > Honest scope: a local hook is convenience, not a security boundary — anyone
 > with shell access can `git commit --no-verify`. The *real* controls are
 > GitHub push protection + the required CI check, which the Pi can't fake.
+
+#### Why there are two tiers
+
+A **cold full-module lint on this Pi takes 66 minutes**, and the cost is not
+linting — it is cgo. The `goolm` build tag (set by CI, and required for
+comparable results) selects the cgo path for `mattn/go-sqlite3`, whose
+amalgamated `sqlite3.c` is a single enormous translation unit. One `cc1`
+invocation accounts for 8+ minutes of wall clock, plus compiler scratch.
+Making that a push gate would just teach everyone to use `--no-verify`.
+
+So the work is split by cost, and measured rather than assumed:
+
+| Tier | Hook | Cost (measured) | Catches |
+|------|------|-----------------|---------|
+| Secrets | `pre-commit` | ~0.5s | Committed credentials |
+| Formatting | `pre-commit` | seconds | gofmt / gci / **golines 120-col** |
+| Changed packages | `pre-push` | **41–65s warm** | Real lint failures |
+| Full module | CI only | 66m locally, ~1m in CI | Everything |
+
+The pre-commit format check uses `golangci-lint fmt`, not bare `gofmt`, on
+purpose: `.golangci.yaml` enables five formatters (`gci`, `gofmt`, `gofumpt`,
+`goimports`, `golines`), and `golines` enforces `max-len: 120`. That limit has
+broken CI on this repo before. Bare `gofmt` would wave a 121-column line
+straight through, so the cheap hook would give false confidence.
+
+#### Skipping and priming
+
+```bash
+PICOCLAW_SKIP_LINT=1 git push   # WIP push, skips the pre-push lint
+git commit --no-verify          # skip everything (discouraged)
+scripts/lint.sh --warm          # prime caches after `go clean`
+```
+
+`--warm` exists because the pre-push hook's 41s depends on a warm build cache
+(~1.4 GB). After a `go clean` the first run reverts to ~9 minutes, which feels
+broken if you don't know why.
+
+#### Four gotchas this script handles for you
+
+1. **`/tmp` is a 463 MB RAM-backed tmpfs on the Pi.** Go writes compiler
+   scratch there and dies partway with
+   `write /tmp/go-build.../importcfg: no space left on device` — while also
+   burning the RAM it was meant to save. `scripts/lint.sh` detects a small
+   tmpfs and redirects `TMPDIR`/`GOTMPDIR` to disk automatically.
+2. **Git hooks run with a minimal PATH**, so `go` and `gitleaks` are often
+   not found — even though they work in your interactive shell. A naive hook
+   then reports "formatted" because the check never ran. Both the hook and the
+   script resolve the toolchain via `scripts/lib/lint-env.sh`.
+3. **Missing tooling behaves differently by check, on purpose.** The formatting
+   check *fails closed*: an unverified format is indistinguishable from a pass,
+   and the fix (install the linter) is cheap. The secret scan *warns loudly and
+   continues*, because `gitleaks.yml` enforces it server-side on every branch —
+   blocking local commits would buy no security and push people to
+   `--no-verify`. Neither case is ever silent.
+4. **A stale local base silently inflates the scope.** With `main` 35 commits
+   behind, "lint what changed" linted 35 commits of unrelated work — and the
+   output looked plausible, so nothing advertised the mistake. The default base
+   now resolves to the freshest remote-tracking ref (`fork/main`, `origin/main`,
+   …), and an explicit stale `LINT_BASE` prints a warning with the drift count.
+
+> On a machine with more RAM the resource caps are skipped automatically —
+> the script keys off `MemAvailable`, not the hostname, so it behaves sanely
+> when copied to a normal workstation.
+
 
 ### Step 5 — Deploy key + git remote (~5 minutes)
 
@@ -1034,6 +1109,10 @@ the agent-driven flow.
 | `.github/workflows/gitleaks.yml` | Server-side secret scan, all branches |
 | `.github/workflows/auto-pr.yml` | Auto-open PR as `github-actions[bot]` on `fix/**`/`feat/**`/`feature/**` push |
 | `scripts/setup-picoclaw.sh` | One-time Pi bootstrap |
+| `scripts/lint.sh` | Tiered local lint runner (`--fmt`, changed, `--all`, `--warm`, `--install-hooks`) |
+| `scripts/lib/lint-env.sh` | Shared toolchain resolution (sourced by the script and hooks) |
+| `.githooks/pre-commit` | Secrets + formatting gate (`core.hooksPath` → here) |
+| `.githooks/pre-push` | Changed-package lint gate |
 | `deploy-picoclaw.sh` | Watchdog script (lives in repo; copied to `/opt/picoclaw/`) |
 | `docs/PIPELINE-README.md` | This guide — complete setup + self-authoring reference |
 | `skills/dev-cycle/SKILL.md` | Agent dev-cycle knowledge — the engine of self-authoring |
